@@ -1,0 +1,860 @@
+{
+	"textures": [
+		{
+			"image": "sprites.png",
+			"format": "RGBA8888",
+			"size": {
+				"w": 60,
+				"h": 209
+			},
+			"scale": 1,
+			"frames": [
+				{
+					"filename": "arthur-1.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 23,
+						"y": 24,
+						"w": 18,
+						"h": 17
+					},
+					"frame": {
+						"x": 1,
+						"y": 1,
+						"w": 18,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-2.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 23,
+						"y": 24,
+						"w": 18,
+						"h": 17
+					},
+					"frame": {
+						"x": 21,
+						"y": 1,
+						"w": 18,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-9.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 23,
+						"y": 24,
+						"w": 18,
+						"h": 17
+					},
+					"frame": {
+						"x": 41,
+						"y": 1,
+						"w": 18,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-10.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 23,
+						"y": 24,
+						"w": 18,
+						"h": 17
+					},
+					"frame": {
+						"x": 1,
+						"y": 20,
+						"w": 18,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-0.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 24,
+						"y": 23,
+						"w": 16,
+						"h": 18
+					},
+					"frame": {
+						"x": 21,
+						"y": 20,
+						"w": 16,
+						"h": 18
+					}
+				},
+				{
+					"filename": "arthur-8.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 24,
+						"y": 23,
+						"w": 16,
+						"h": 18
+					},
+					"frame": {
+						"x": 1,
+						"y": 39,
+						"w": 16,
+						"h": 18
+					}
+				},
+				{
+					"filename": "arthur-16.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 24,
+						"y": 23,
+						"w": 16,
+						"h": 18
+					},
+					"frame": {
+						"x": 39,
+						"y": 20,
+						"w": 16,
+						"h": 18
+					}
+				},
+				{
+					"filename": "arthur-19.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 24,
+						"y": 23,
+						"w": 16,
+						"h": 18
+					},
+					"frame": {
+						"x": 19,
+						"y": 40,
+						"w": 16,
+						"h": 18
+					}
+				},
+				{
+					"filename": "arthur-28.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 24,
+						"y": 23,
+						"w": 16,
+						"h": 18
+					},
+					"frame": {
+						"x": 1,
+						"y": 59,
+						"w": 16,
+						"h": 18
+					}
+				},
+				{
+					"filename": "arthur-31.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 24,
+						"y": 23,
+						"w": 16,
+						"h": 18
+					},
+					"frame": {
+						"x": 37,
+						"y": 40,
+						"w": 16,
+						"h": 18
+					}
+				},
+				{
+					"filename": "arthur-3.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 24,
+						"y": 24,
+						"w": 16,
+						"h": 17
+					},
+					"frame": {
+						"x": 19,
+						"y": 60,
+						"w": 16,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-11.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 24,
+						"y": 24,
+						"w": 16,
+						"h": 17
+					},
+					"frame": {
+						"x": 37,
+						"y": 60,
+						"w": 16,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-17.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 25,
+						"y": 24,
+						"w": 13,
+						"h": 18
+					},
+					"frame": {
+						"x": 1,
+						"y": 79,
+						"w": 13,
+						"h": 18
+					}
+				},
+				{
+					"filename": "arthur-20.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 24,
+						"w": 13,
+						"h": 18
+					},
+					"frame": {
+						"x": 16,
+						"y": 79,
+						"w": 13,
+						"h": 18
+					}
+				},
+				{
+					"filename": "arthur-29.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 24,
+						"w": 13,
+						"h": 18
+					},
+					"frame": {
+						"x": 31,
+						"y": 79,
+						"w": 13,
+						"h": 18
+					}
+				},
+				{
+					"filename": "arthur-32.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 25,
+						"y": 24,
+						"w": 13,
+						"h": 18
+					},
+					"frame": {
+						"x": 46,
+						"y": 79,
+						"w": 13,
+						"h": 18
+					}
+				},
+				{
+					"filename": "arthur-18.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 25,
+						"y": 24,
+						"w": 13,
+						"h": 17
+					},
+					"frame": {
+						"x": 1,
+						"y": 99,
+						"w": 13,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-21.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 24,
+						"w": 13,
+						"h": 17
+					},
+					"frame": {
+						"x": 16,
+						"y": 99,
+						"w": 13,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-30.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 24,
+						"w": 13,
+						"h": 17
+					},
+					"frame": {
+						"x": 31,
+						"y": 99,
+						"w": 13,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-33.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 25,
+						"y": 24,
+						"w": 13,
+						"h": 17
+					},
+					"frame": {
+						"x": 46,
+						"y": 99,
+						"w": 13,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-26.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 25,
+						"y": 25,
+						"w": 13,
+						"h": 16
+					},
+					"frame": {
+						"x": 1,
+						"y": 118,
+						"w": 13,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-27.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 25,
+						"y": 25,
+						"w": 13,
+						"h": 16
+					},
+					"frame": {
+						"x": 16,
+						"y": 118,
+						"w": 13,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-38.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 13,
+						"h": 16
+					},
+					"frame": {
+						"x": 31,
+						"y": 118,
+						"w": 13,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-39.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 13,
+						"h": 16
+					},
+					"frame": {
+						"x": 46,
+						"y": 118,
+						"w": 13,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-4.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 24,
+						"w": 12,
+						"h": 17
+					},
+					"frame": {
+						"x": 1,
+						"y": 136,
+						"w": 12,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-12.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 24,
+						"w": 12,
+						"h": 17
+					},
+					"frame": {
+						"x": 15,
+						"y": 136,
+						"w": 12,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-22.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 24,
+						"w": 12,
+						"h": 17
+					},
+					"frame": {
+						"x": 29,
+						"y": 136,
+						"w": 12,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-25.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 24,
+						"w": 12,
+						"h": 17
+					},
+					"frame": {
+						"x": 43,
+						"y": 136,
+						"w": 12,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-34.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 24,
+						"w": 12,
+						"h": 17
+					},
+					"frame": {
+						"x": 1,
+						"y": 155,
+						"w": 12,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-37.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 24,
+						"w": 12,
+						"h": 17
+					},
+					"frame": {
+						"x": 15,
+						"y": 155,
+						"w": 12,
+						"h": 17
+					}
+				},
+				{
+					"filename": "arthur-5.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 12,
+						"h": 16
+					},
+					"frame": {
+						"x": 29,
+						"y": 155,
+						"w": 12,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-6.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 12,
+						"h": 16
+					},
+					"frame": {
+						"x": 43,
+						"y": 155,
+						"w": 12,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-7.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 12,
+						"h": 16
+					},
+					"frame": {
+						"x": 29,
+						"y": 173,
+						"w": 12,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-13.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 12,
+						"h": 16
+					},
+					"frame": {
+						"x": 43,
+						"y": 173,
+						"w": 12,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-14.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 12,
+						"h": 16
+					},
+					"frame": {
+						"x": 1,
+						"y": 174,
+						"w": 12,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-15.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 12,
+						"h": 16
+					},
+					"frame": {
+						"x": 15,
+						"y": 174,
+						"w": 12,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-23.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 12,
+						"h": 16
+					},
+					"frame": {
+						"x": 29,
+						"y": 191,
+						"w": 12,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-24.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 12,
+						"h": 16
+					},
+					"frame": {
+						"x": 43,
+						"y": 191,
+						"w": 12,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-35.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 12,
+						"h": 16
+					},
+					"frame": {
+						"x": 1,
+						"y": 192,
+						"w": 12,
+						"h": 16
+					}
+				},
+				{
+					"filename": "arthur-36.png",
+					"rotated": false,
+					"trimmed": true,
+					"sourceSize": {
+						"w": 64,
+						"h": 64
+					},
+					"spriteSourceSize": {
+						"x": 26,
+						"y": 25,
+						"w": 12,
+						"h": 16
+					},
+					"frame": {
+						"x": 15,
+						"y": 192,
+						"w": 12,
+						"h": 16
+					}
+				}
+			]
+		}
+	],
+	"meta": {
+		"app": "https://www.codeandweb.com/texturepacker",
+		"version": "3.0",
+		"smartupdate": "$TexturePacker:SmartUpdate:5b2250ac99993c12393a6dabc4cfbe72:293f1fa67aa51bd60beb0f1d152ee82d:1eabdf11f75e3a4fe3147baf7b5be24b$"
+	}
+}
