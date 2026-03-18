@@ -1,23 +1,18 @@
-import React from 'react';
-import Phaser from 'phaser';
-import { render } from 'phaser-jsx';
+import React from "react";
+import Phaser from "phaser";
+import { render } from "phaser-jsx";
 
-import { TilemapDebug } from '../components';
-import {
-  Depth,
-  key,
-  TilemapLayer,
-  TILESET_NAME,
-} from '../constants';
-import { useSimulationStore } from '../store/simulation';
-import { loadBuildAsync, SavedDoor, SavedRegion } from '../store/build';
-import { AgentManager } from '../managers';
-import { Door, Region } from '../sprites';
-import { initSimulationTime } from '../ai/context/time';
+import { TilemapDebug } from "../components";
+import { Depth, key, TilemapLayer, TILESET_NAME } from "../constants";
+import { useSimulationStore } from "../store/simulation";
+import { loadBuildAsync, SavedDoor, SavedRegion } from "../store/build";
+import { AgentManager } from "../managers";
+import { Door, Region } from "../sprites";
+import { initSimulationTime } from "../ai/context/time";
 
 /**
  * Main game scene that displays a tilemap with Agents and camera controls
- * 
+ *
  * Features:
  * - Tilemap with floor, decorative trees, and collision walls
  * - Free camera movement with WASD/arrow keys
@@ -33,7 +28,7 @@ export class Main extends Phaser.Scene {
   private regions!: Phaser.GameObjects.Group;
   private selectionRectangle!: Phaser.GameObjects.Rectangle;
   private selectedRegion: Region | null = null;
-  
+
   // Input controls
   private keys!: Phaser.Types.Input.Keyboard.CursorKeys & {
     w: Phaser.Input.Keyboard.Key;
@@ -41,8 +36,9 @@ export class Main extends Phaser.Scene {
     s: Phaser.Input.Keyboard.Key;
     d: Phaser.Input.Keyboard.Key;
     space: Phaser.Input.Keyboard.Key;
+    b: Phaser.Input.Keyboard.Key;
   };
-  
+
   // Camera settings
   private readonly CAMERA_SPEED = 300; // pixels per second
   private readonly MAP_VISIBILITY_BUFFER = 0.8; // Keep 80% of map visible when scrolling
@@ -63,13 +59,15 @@ export class Main extends Phaser.Scene {
     this.setupCollisions();
     this.addDebugOverlay();
     this.setupWindowResize();
-    this.selectionRectangle = this.add.rectangle(0, 0, 0, 0, 0x1d4ed8, 0.5).setOrigin(0, 0);
+    this.selectionRectangle = this.add
+      .rectangle(0, 0, 0, 0, 0x1d4ed8, 0.5)
+      .setOrigin(0, 0);
     this.selectionRectangle.setDepth(Depth.AbovePlayer);
     this.selectionRectangle.setVisible(false);
-    
+
     // Initialize simulation time
     initSimulationTime();
-    
+
     // No-op: React reads from Zustand store directly
   }
 
@@ -80,6 +78,12 @@ export class Main extends Phaser.Scene {
     // Handle pause toggle
     if (Phaser.Input.Keyboard.JustDown(this.keys.space)) {
       useSimulationStore.getState().togglePause();
+    }
+
+    // Handle build mode toggle
+    if (Phaser.Input.Keyboard.JustDown(this.keys.b)) {
+      const store = useSimulationStore.getState();
+      store.setBuildMode(store.buildMode ? null : "regions");
     }
 
     // Skip updates if paused
@@ -97,23 +101,28 @@ export class Main extends Phaser.Scene {
   private createMap() {
     // Load the tilemap data
     this.map = this.make.tilemap({ key: key.tilemap.stanfordPrison });
-    
+
     // Connect tileset image to tilemap
     const tileset = this.map.addTilesetImage(TILESET_NAME, key.image.tileset)!;
-    
+
     // Create layers in rendering order (bottom to top)
     this.map.createLayer(TilemapLayer.Floor, tileset, 0, 0); // Background
-    
+
     const trees = this.map.createLayer(TilemapLayer.Trees, tileset, 0, 0);
     trees?.setDepth(Depth.AbovePlayer); // Render trees above everything else
-    
+
     this.wallLayer = this.map.createLayer(TilemapLayer.Walls, tileset, 0, 0)!;
-    
+
     // Setup collision detection for walls
     this.wallLayer.setCollisionBetween(1, 1000); // Any non-empty tile blocks movement
-    
+
     // Set physics world bounds to match map size
-    this.physics.world.bounds.setTo(0, 0, this.wallLayer.width, this.wallLayer.height);
+    this.physics.world.bounds.setTo(
+      0,
+      0,
+      this.wallLayer.width,
+      this.wallLayer.height,
+    );
   }
 
   /**
@@ -121,26 +130,26 @@ export class Main extends Phaser.Scene {
    */
   private setupCamera() {
     const camera = this.cameras.main;
-    
+
     // Always zoom to fill the screen (like fitting an image)
     const screenWidth = this.scale.width;
     const screenHeight = this.scale.height;
     const mapWidth = this.map.widthInPixels;
     const mapHeight = this.map.heightInPixels;
-    
+
     // Calculate zoom to fill screen completely, but never smaller than 1:1 pixels
     const zoomX = screenWidth / mapWidth;
     const zoomY = screenHeight / mapHeight;
     const zoom = Math.max(2, Math.max(zoomX, zoomY)); // Fill screen but max 1x zoom
-    
+
     camera.setZoom(zoom);
     camera.removeBounds();
-    
+
     // Point the camera at the center of the map (in map coordinates)
     // Phaser will handle the rest with zoom
     const mapCenterX = mapWidth / 2;
     const mapCenterY = mapHeight / 2;
-    
+
     camera.centerOn(mapCenterX, mapCenterY);
   }
 
@@ -162,10 +171,13 @@ export class Main extends Phaser.Scene {
     // Add pause key
     this.keys.space = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
+    // Add build mode toggle key
+    this.keys.b = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.B);
+
     // Add mouse click handler for build mode
-    this.input.on('pointerdown', this.handlePointerDown, this);
-    this.input.on('pointermove', this.handlePointerMove, this);
-    this.input.on('pointerup', this.handlePointerUp, this);
+    this.input.on("pointerdown", this.handlePointerDown, this);
+    this.input.on("pointermove", this.handlePointerMove, this);
+    this.input.on("pointerup", this.handlePointerUp, this);
   }
 
   /**
@@ -180,12 +192,16 @@ export class Main extends Phaser.Scene {
    * Setup collision handlers for agents and doors
    */
   private setupCollisions() {
-    this.physics.add.collider(this.npcs.getAgents(), this.doors, (agent, door) => {
-      const doorSprite = door as Door;
-      if (!doorSprite.isDoorLocked()) {
-        doorSprite.open();
-      }
-    });
+    this.physics.add.collider(
+      this.npcs.getAgents(),
+      this.doors,
+      (agent, door) => {
+        const doorSprite = door as Door;
+        if (!doorSprite.isDoorLocked()) {
+          doorSprite.open();
+        }
+      },
+    );
   }
 
   /**
@@ -199,7 +215,7 @@ export class Main extends Phaser.Scene {
    * Handle window resize events
    */
   private setupWindowResize() {
-    this.scale.on('resize', () => {
+    this.scale.on("resize", () => {
       this.setupCamera(); // Recalculate position for new screen size
     });
   }
@@ -211,11 +227,11 @@ export class Main extends Phaser.Scene {
     const camera = this.cameras.main;
     const deltaTime = this.game.loop.delta / 1000; // Convert to seconds
     const moveSpeed = this.CAMERA_SPEED * deltaTime;
-    
+
     // Calculate movement based on pressed keys
     let deltaX = 0;
     let deltaY = 0;
-    
+
     // Horizontal movement
     if (this.keys.left.isDown || this.keys.a.isDown) {
       deltaX = -moveSpeed;
@@ -223,30 +239,38 @@ export class Main extends Phaser.Scene {
     if (this.keys.right.isDown || this.keys.d.isDown) {
       deltaX = moveSpeed;
     }
-    
-    // Vertical movement  
+
+    // Vertical movement
     if (this.keys.up.isDown || this.keys.w.isDown) {
       deltaY = -moveSpeed;
     }
     if (this.keys.down.isDown || this.keys.s.isDown) {
       deltaY = moveSpeed;
     }
-    
+
     // Apply movement if any keys are pressed
     if (deltaX !== 0 || deltaY !== 0) {
       // Get current center position using Phaser's built-in properties
       const currentCenterX = camera.midPoint.x;
       const currentCenterY = camera.midPoint.y;
-      
+
       // Calculate new center position
       const newCenterX = currentCenterX + deltaX;
       const newCenterY = currentCenterY + deltaY;
-      
+
       // Apply bounds to the center position
       const bounds = this.getCenterBounds();
-      const clampedCenterX = Phaser.Math.Clamp(newCenterX, bounds.minCenterX, bounds.maxCenterX);
-      const clampedCenterY = Phaser.Math.Clamp(newCenterY, bounds.minCenterY, bounds.maxCenterY);
-      
+      const clampedCenterX = Phaser.Math.Clamp(
+        newCenterX,
+        bounds.minCenterX,
+        bounds.maxCenterX,
+      );
+      const clampedCenterY = Phaser.Math.Clamp(
+        newCenterY,
+        bounds.minCenterY,
+        bounds.maxCenterY,
+      );
+
       // Use centerOn to maintain consistency
       camera.centerOn(clampedCenterX, clampedCenterY);
     }
@@ -254,25 +278,25 @@ export class Main extends Phaser.Scene {
 
   /**
    * Calculate valid camera center bounds for movement
-   * 
+   *
    * @returns Object with min/max center X/Y positions
    */
   private getCenterBounds() {
     const camera = this.cameras.main;
     const mapWidth = this.map.widthInPixels;
     const mapHeight = this.map.heightInPixels;
-    
+
     // How much of the map is visible at current zoom
     const visibleMapWidth = this.scale.width / camera.zoom;
     const visibleMapHeight = this.scale.height / camera.zoom;
-    
+
     // Simple bounds: center can move within the map boundaries
     // If map is smaller than view, center stays at map center
     const halfViewWidth = visibleMapWidth / 2;
     const halfViewHeight = visibleMapHeight / 2;
-    
+
     let minCenterX, maxCenterX, minCenterY, maxCenterY;
-    
+
     // X bounds
     if (mapWidth <= visibleMapWidth) {
       // Map fits within view - lock to center
@@ -282,8 +306,8 @@ export class Main extends Phaser.Scene {
       minCenterX = halfViewWidth;
       maxCenterX = mapWidth - halfViewWidth;
     }
-    
-    // Y bounds  
+
+    // Y bounds
     if (mapHeight <= visibleMapHeight) {
       // Map fits within view - lock to center
       minCenterY = maxCenterY = mapHeight / 2;
@@ -292,12 +316,12 @@ export class Main extends Phaser.Scene {
       minCenterY = halfViewHeight;
       maxCenterY = mapHeight - halfViewHeight;
     }
-    
+
     return {
       minCenterX,
       maxCenterX,
       minCenterY,
-      maxCenterY
+      maxCenterY,
     };
   }
 
@@ -311,16 +335,20 @@ export class Main extends Phaser.Scene {
       // Convert screen coordinates to world coordinates
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
 
-
-      if (currentBuildMode === 'doors') {
+      if (currentBuildMode === "doors") {
         // Check if there's already a door at this location
-        const existingDoor = this.findDoorAt(worldPoint.x, worldPoint.y) as Door | null;
+        const existingDoor = this.findDoorAt(
+          worldPoint.x,
+          worldPoint.y,
+        ) as Door | null;
 
         if (existingDoor) {
           // Right-click toggles lock state, left-click toggles door type
-          if (pointer.button === 2) { // Right mouse button
+          if (pointer.button === 2) {
+            // Right mouse button
             this.toggleDoorLock(existingDoor);
-          } else { // Left mouse button or touch
+          } else {
+            // Left mouse button or touch
             this.toggleDoorType(existingDoor);
           }
         } else {
@@ -329,7 +357,7 @@ export class Main extends Phaser.Scene {
             this.placeDoor(worldPoint.x, worldPoint.y);
           }
         }
-      } else if (currentBuildMode === 'regions') {
+      } else if (currentBuildMode === "regions") {
         // Handle region placement
         if (pointer.button === 2) {
           const region = this.findRegionAt(worldPoint.x, worldPoint.y);
@@ -381,11 +409,11 @@ export class Main extends Phaser.Scene {
 
     try {
       // Create a new door
-      const door = new Door(this, snappedX, snappedY, 'horizontal', 'left');
+      const door = new Door(this, snappedX, snappedY, "horizontal", "left");
 
       this.doors.add(door);
     } catch (error) {
-      console.error('Error creating door:', error);
+      console.error("Error creating door:", error);
     }
   }
 
@@ -393,7 +421,7 @@ export class Main extends Phaser.Scene {
    * Place a region at the specified world coordinates
    */
   private placeRegion(x: number, y: number, width: number, height: number) {
-    const label = prompt('Enter region label:');
+    const label = prompt("Enter region label:");
     if (label) {
       const region = new Region(
         this,
@@ -402,7 +430,11 @@ export class Main extends Phaser.Scene {
         width,
         height,
         label,
-        Phaser.Display.Color.GetColor(Phaser.Math.Between(0, 255), Phaser.Math.Between(0, 255), Phaser.Math.Between(0, 255))
+        Phaser.Display.Color.GetColor(
+          Phaser.Math.Between(0, 255),
+          Phaser.Math.Between(0, 255),
+          Phaser.Math.Between(0, 255),
+        ),
       );
       this.regions.add(region);
     }
@@ -425,7 +457,10 @@ export class Main extends Phaser.Scene {
   /**
    * Find a door at the specified world coordinates
    */
-  private findDoorAt(worldX: number, worldY: number): Phaser.GameObjects.GameObject | null {
+  private findDoorAt(
+    worldX: number,
+    worldY: number,
+  ): Phaser.GameObjects.GameObject | null {
     // Snap the coordinates to the same grid as door placement
     const snappedX = Math.floor(worldX / 16) * 16 + 8;
     const snappedY = Math.floor(worldY / 16) * 16 + 8;
@@ -450,17 +485,17 @@ export class Main extends Phaser.Scene {
   private toggleDoorType(door: Door) {
     const currentType = door.getDoorType();
 
-    if (currentType === 'horizontal') {
+    if (currentType === "horizontal") {
       // horizontal → vertical-left
-      door.setDoorType('vertical');
-      door.setDoorPosition('left');
+      door.setDoorType("vertical");
+      door.setDoorPosition("left");
     } else {
       // vertical door - check position
       const currentPosition = door.getDoorPosition();
 
-      if (currentPosition === 'left') {
+      if (currentPosition === "left") {
         // vertical-left → vertical-right
-        door.setDoorPosition('right');
+        door.setDoorPosition("right");
       } else {
         // vertical-right → remove door
         this.removeDoor(door);
@@ -509,7 +544,7 @@ export class Main extends Phaser.Scene {
           savedDoor.y,
           savedDoor.type,
           savedDoor.position,
-          savedDoor.isLocked
+          savedDoor.isLocked,
         );
 
         // Set the door state (open/closed)
@@ -530,13 +565,13 @@ export class Main extends Phaser.Scene {
           savedRegion.width,
           savedRegion.height,
           savedRegion.label,
-          savedRegion.color
+          savedRegion.color,
         );
 
         this.regions.add(region);
       }
     } catch (error) {
-      console.error('Error loading saved build:', error);
+      console.error("Error loading saved build:", error);
     }
   }
 }

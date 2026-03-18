@@ -1,1 +1,184 @@
-{"doors":[{"x":120,"y":136,"type":"horizontal","position":"left","isOpen":false,"isLocked":false},{"x":120,"y":328,"type":"horizontal","position":"left","isOpen":false,"isLocked":false},{"x":120,"y":408,"type":"horizontal","position":"left","isOpen":false,"isLocked":false},{"x":280,"y":296,"type":"horizontal","position":"left","isOpen":false,"isLocked":false},{"x":280,"y":200,"type":"horizontal","position":"left","isOpen":false,"isLocked":false},{"x":456,"y":200,"type":"horizontal","position":"left","isOpen":true,"isLocked":false},{"x":456,"y":296,"type":"horizontal","position":"left","isOpen":false,"isLocked":false},{"x":528.5,"y":248,"type":"vertical","position":"right","isOpen":false,"isLocked":false},{"x":608.5,"y":248,"type":"vertical","position":"left","isOpen":false,"isLocked":false},{"x":704.5,"y":248,"type":"vertical","position":"left","isOpen":true,"isLocked":false},{"x":552,"y":248,"type":"vertical","position":"left","isOpen":false,"isLocked":false},{"x":184,"y":248,"type":"vertical","position":"right","isOpen":false,"isLocked":false}],"regions":[{"x":256,"y":304,"width":64,"height":48,"label":"Solitary","color":15866910},{"x":432,"y":304,"width":64,"height":48,"label":"Shower","color":4900741},{"x":256,"y":144.77845350835946,"width":64,"height":48,"label":"Cell 1","color":16483382},{"x":432,"y":144,"width":64,"height":48,"label":"Cell 2","color":8671796},{"x":544,"y":208,"width":64,"height":80,"label":"Delivery","color":5323661},{"x":608,"y":224,"width":96,"height":48,"label":"Entry","color":8469739},{"x":56.21546491640538,"y":336,"width":128,"height":64,"label":"Rec Room","color":3343189},{"x":55.04778465386619,"y":144.38922675417976,"width":128,"height":176,"label":"Guards","color":6571727},{"x":192,"y":208,"width":336,"height":80,"label":"Common Area","color":7626900}],"version":"1.1.0","timestamp":1757455832459}
+{
+  "doors": [
+    {
+      "x": 120,
+      "y": 136,
+      "type": "horizontal",
+      "position": "left",
+      "isOpen": false,
+      "isLocked": false
+    },
+    {
+      "x": 120,
+      "y": 328,
+      "type": "horizontal",
+      "position": "left",
+      "isOpen": false,
+      "isLocked": false
+    },
+    {
+      "x": 120,
+      "y": 408,
+      "type": "horizontal",
+      "position": "left",
+      "isOpen": false,
+      "isLocked": false
+    },
+    {
+      "x": 280,
+      "y": 296,
+      "type": "horizontal",
+      "position": "left",
+      "isOpen": false,
+      "isLocked": false
+    },
+    {
+      "x": 280,
+      "y": 200,
+      "type": "horizontal",
+      "position": "left",
+      "isOpen": false,
+      "isLocked": false
+    },
+    {
+      "x": 456,
+      "y": 200,
+      "type": "horizontal",
+      "position": "left",
+      "isOpen": true,
+      "isLocked": false
+    },
+    {
+      "x": 456,
+      "y": 296,
+      "type": "horizontal",
+      "position": "left",
+      "isOpen": false,
+      "isLocked": false
+    },
+    {
+      "x": 528.5,
+      "y": 248,
+      "type": "vertical",
+      "position": "right",
+      "isOpen": false,
+      "isLocked": false
+    },
+    {
+      "x": 608.5,
+      "y": 248,
+      "type": "vertical",
+      "position": "left",
+      "isOpen": false,
+      "isLocked": false
+    },
+    {
+      "x": 704.5,
+      "y": 248,
+      "type": "vertical",
+      "position": "left",
+      "isOpen": true,
+      "isLocked": false
+    },
+    {
+      "x": 552,
+      "y": 248,
+      "type": "vertical",
+      "position": "left",
+      "isOpen": false,
+      "isLocked": false
+    },
+    {
+      "x": 184,
+      "y": 248,
+      "type": "vertical",
+      "position": "right",
+      "isOpen": false,
+      "isLocked": false
+    }
+  ],
+  "regions": [
+    {
+      "x": 256,
+      "y": 304,
+      "width": 64,
+      "height": 48,
+      "label": "Cell 3",
+      "color": 15866910
+    },
+    {
+      "x": 432,
+      "y": 304,
+      "width": 64,
+      "height": 48,
+      "label": "Shower",
+      "color": 4900741
+    },
+    {
+      "x": 256,
+      "y": 144.77845350835946,
+      "width": 64,
+      "height": 48,
+      "label": "Cell 1",
+      "color": 16483382
+    },
+    {
+      "x": 432,
+      "y": 144,
+      "width": 64,
+      "height": 48,
+      "label": "Cell 2",
+      "color": 8671796
+    },
+    {
+      "x": 544,
+      "y": 208,
+      "width": 64,
+      "height": 80,
+      "label": "Delivery",
+      "color": 5323661
+    },
+    {
+      "x": 608,
+      "y": 224,
+      "width": 96,
+      "height": 48,
+      "label": "Entry",
+      "color": 8469739
+    },
+    {
+      "x": 56.21546491640538,
+      "y": 336,
+      "width": 128,
+      "height": 64,
+      "label": "Rec Room",
+      "color": 3343189
+    },
+    {
+      "x": 55.04778465386619,
+      "y": 144.38922675417976,
+      "width": 128,
+      "height": 176,
+      "label": "Guards",
+      "color": 6571727
+    },
+    {
+      "x": 192,
+      "y": 208,
+      "width": 336,
+      "height": 80,
+      "label": "Common Area",
+      "color": 7626900
+    },
+    {
+      "x": 80,
+      "y": 416,
+      "width": 80,
+      "height": 48,
+      "label": "Solitary",
+      "color": 11427910
+    }
+  ],
+  "version": "1.1.0",
+  "timestamp": 1757455832459
+}

@@ -6,27 +6,29 @@
  * Every ~8 seconds, each agent gets a fresh tick with updated dynamic context.
  */
 
-import { generateText, type CoreMessage } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
+import { generateText, type CoreMessage } from "ai";
+import { createOpenAI } from "@ai-sdk/openai";
 
-import type { AgentConfig, RegionConfig } from '@/engine/types';
-import { useAgentsStore } from '@/store/agents';
-import { useChatsStore } from '@/store/chats';
+import type { AgentConfig, RegionConfig } from "@/engine/types";
+import { useAgentsStore } from "@/store/agents";
+import { useChatsStore } from "@/store/chats";
 
-import { RateLimiter } from './rate-limiter';
-import { getTimeContext } from './context/time';
-import { getNearbyContext } from './context/nearby';
+import { RateLimiter } from "./rate-limiter";
+import { getTimeContext } from "./context/time";
+import { getNearbyContext } from "./context/nearby";
 
-import { createMoveTools } from './tools/move';
-import { createChatTools } from './tools/chat';
-import { createDoorTools, getDoorContext } from './tools/door';
-import { createMemoryTool, MemoryStore } from './tools/memory';
-import { createEmotionsTool, EmotionState } from './tools/emotions';
-import { createRelationshipTools, RelationshipState } from './tools/relationship';
-import { createPointsTools, getPointsContext } from './tools/points';
+import { createMoveTools } from "./tools/move";
+import { createChatTools } from "./tools/chat";
+import { createDoorTools, getDoorContext } from "./tools/door";
+import { createMemoryTool, MemoryStore } from "./tools/memory";
+import {
+  createRelationshipTools,
+  RelationshipState,
+} from "./tools/relationship";
+import { createPointsTools, getPointsContext } from "./tools/points";
 
-import { getPrisonerPrompt } from '@/scenarios/prison/prompts/prisoner';
-import { getGuardPrompt } from '@/scenarios/prison/prompts/guard';
+import { getPrisonerPrompt } from "@/scenarios/prison/prompts/prisoner";
+import { getGuardPrompt } from "@/scenarios/prison/prompts/guard";
 
 // --- State per agent ---
 
@@ -35,7 +37,6 @@ interface AgentRuntime {
   systemPrompt: string;
   messages: CoreMessage[];
   memoryStore: MemoryStore;
-  emotionState: EmotionState;
   relationshipState: RelationshipState;
   running: boolean;
 }
@@ -47,9 +48,25 @@ const rateLimiter = new RateLimiter(800);
 
 export interface BridgeFunctions {
   moveTo: (agentId: string, x: number, y: number) => Promise<boolean>;
-  forceMoveTo: (guardId: string, prisonerId: string, x: number, y: number) => Promise<boolean>;
-  findDoorByRegions: (r1: string, r2: string) => { door: unknown; lock: (d: unknown) => boolean; unlock: (d: unknown) => boolean } | null;
-  getAllDoorStates: () => Array<{ region1: string; region2: string; isLocked: boolean }>;
+  forceMoveTo: (
+    guardId: string,
+    prisonerId: string,
+    x: number,
+    y: number,
+  ) => Promise<boolean>;
+  findDoorByRegions: (
+    r1: string,
+    r2: string,
+  ) => {
+    door: unknown;
+    lock: (d: unknown) => boolean;
+    unlock: (d: unknown) => boolean;
+  } | null;
+  getAllDoorStates: () => Array<{
+    region1: string;
+    region2: string;
+    isLocked: boolean;
+  }>;
   getRegions: () => RegionConfig[];
 }
 
@@ -57,41 +74,57 @@ let bridgeFns: BridgeFunctions | null = null;
 
 export function setBridgeFunctions(fns: BridgeFunctions) {
   bridgeFns = fns;
-  console.log('[AI] Bridge functions set. Regions available:', fns.getRegions().length);
+  console.log(
+    "[AI] Bridge functions set. Regions available:",
+    fns.getRegions().length,
+  );
 }
 
 // --- OpenRouter model ---
 
-let model: ReturnType<ReturnType<typeof createOpenAI>> | null = null;
+const modelCache = new Map<
+  string,
+  ReturnType<ReturnType<typeof createOpenAI>>
+>();
 
-function getModel() {
-  if (model) return model;
-  const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || '';
+function getModel(role: string) {
+  const modelId =
+    role === "guard"
+      ? import.meta.env.VITE_GUARD_MODEL || "openrouter/free"
+      : import.meta.env.VITE_PRISONER_MODEL || "openrouter/free";
+
+  const cached = modelCache.get(modelId);
+  if (cached) return cached;
+
+  const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || "";
   if (!apiKey) {
-    console.error('[AI] VITE_OPENROUTER_API_KEY is not set! Agents will not work.');
+    console.error(
+      "[AI] VITE_OPENROUTER_API_KEY is not set! Agents will not work.",
+    );
   }
   const openrouter = createOpenAI({
-    baseURL: 'https://openrouter.ai/api/v1',
+    baseURL: "https://openrouter.ai/api/v1",
     apiKey,
   });
-  model = openrouter('openrouter/free');
+  const model = openrouter(modelId);
+  modelCache.set(modelId, model);
   return model;
 }
 
 // --- System prompt builder ---
 
 function buildSystemPrompt(agentConfig: AgentConfig): string {
-  const number = agentConfig.name.replace(/[^0-9]/g, '') || '1';
+  const number = agentConfig.name.replace(/[^0-9]/g, "") || "1";
 
-  if (agentConfig.role === 'guard') {
+  if (agentConfig.role === "guard") {
     const prisoners = useAgentsStore
       .getState()
       .getAllAgents()
-      .filter((a) => a.role === 'prisoner')
-      .map((p) => p.name.replace(/[^0-9]/g, ''))
+      .filter((a) => a.role === "prisoner")
+      .map((p) => p.name.replace(/[^0-9]/g, ""))
       .filter(Boolean)
-      .join(', ');
-    return getGuardPrompt(number, prisoners || '1, 2, 3, 4, 5');
+      .join(", ");
+    return getGuardPrompt(number, prisoners || "1, 2, 3, 4, 5");
   }
 
   return getPrisonerPrompt(number);
@@ -103,7 +136,6 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
   sections.push(getTimeContext());
   sections.push(getNearbyContext(agentId));
   sections.push(runtime.memoryStore.getContext());
-  sections.push(runtime.emotionState.getContext());
   sections.push(runtime.relationshipState.getContext());
 
   // Points context
@@ -113,21 +145,24 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
       agentId,
       role: runtime.config.role,
       getPoints: (id) => useAgentsStore.getState().getPoints(id),
-      getAllPrisonerPoints: () => useAgentsStore.getState().getAllPrisonerPoints(),
+      getAllPrisonerPoints: () =>
+        useAgentsStore.getState().getAllPrisonerPoints(),
     }),
   );
 
   // Door states
   if (bridgeFns) {
-    sections.push(getDoorContext({ getAllDoorStates: bridgeFns.getAllDoorStates }));
+    sections.push(
+      getDoorContext({ getAllDoorStates: bridgeFns.getAllDoorStates }),
+    );
   }
 
   // Available regions (so the agent knows what move targets exist)
   // Filter out "Escape" — agents shouldn't navigate there directly
   if (bridgeFns) {
-    const regions = bridgeFns.getRegions().filter((r) => r.label !== 'Escape');
+    const regions = bridgeFns.getRegions().filter((r) => r.label !== "Escape");
     if (regions.length > 0) {
-      const regionNames = regions.map((r) => r.label).join(', ');
+      const regionNames = regions.map((r) => r.label).join(", ");
       sections.push(`[Available Regions] ${regionNames}`);
     }
   }
@@ -141,25 +176,27 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
       const participantNames = session.participants
         .filter((pid) => pid !== agentId)
         .map((pid) => agentsStore.getAgent(pid)?.name ?? pid)
-        .join(', ');
+        .join(", ");
 
       const messages = session.messages;
       if (messages.length > 0) {
-        const chatLines = messages.slice(-10).map((m) => `${m.name}: ${m.content}`);
+        const chatLines = messages
+          .slice(-10)
+          .map((m) => `${m.name}: ${m.content}`);
         const lastMsg = messages[messages.length - 1];
         const lastSpeakerIsMe = lastMsg.id === agentId;
 
         sections.push(
           `[ACTIVE CONVERSATION with ${participantNames}]\n` +
-          `${chatLines.join('\n')}\n` +
-          (lastSpeakerIsMe
-            ? `(You spoke last. Wait for a response, or use leave_chat if done.)`
-            : `(${lastMsg.name} just spoke. You MUST respond using the "say" tool now.)`)
+            `${chatLines.join("\n")}\n` +
+            (lastSpeakerIsMe
+              ? `(You spoke last. Wait for a response, or use leave_chat if done.)`
+              : `(${lastMsg.name} just spoke. You MUST respond using the "say" tool now.)`),
         );
       } else {
         sections.push(
           `[ACTIVE CONVERSATION with ${participantNames}]\n` +
-          `(Conversation just started. Use the "say" tool to greet them.)`
+            `(Conversation just started. Use the "say" tool to greet them.)`,
         );
       }
     }
@@ -169,12 +206,14 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
     const nearby = chatsStore.getNearbyAgents(agentId);
     const nearbyInChat = nearby.filter((n) => n.inChat);
     if (nearbyInChat.length > 0) {
-      const names = nearbyInChat.map((n) => n.name).join(', ');
-      sections.push(`[Note] ${names} ${nearbyInChat.length === 1 ? 'is' : 'are'} in a conversation nearby. You could use start_chat to join.`);
+      const names = nearbyInChat.map((n) => n.name).join(", ");
+      sections.push(
+        `[Note] ${names} ${nearbyInChat.length === 1 ? "is" : "are"} in a conversation nearby. You could use start_chat to join.`,
+      );
     }
   }
 
-  return sections.filter(Boolean).join('\n\n');
+  return sections.filter(Boolean).join("\n\n");
 }
 
 // --- Tool composition ---
@@ -184,7 +223,10 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
  * always read the latest store values (not stale snapshots).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildTools(agentId: string, runtime: AgentRuntime): Record<string, any> {
+function buildTools(
+  agentId: string,
+  runtime: AgentRuntime,
+): Record<string, any> {
   if (!bridgeFns) {
     console.warn(`[AI] Bridge not ready, no tools for ${agentId}`);
     return {};
@@ -197,10 +239,10 @@ function buildTools(agentId: string, runtime: AgentRuntime): Record<string, any>
       agentId,
       getRegions: () => bf.getRegions(),
       moveTo: bf.moveTo,
-      forceMoveTo: runtime.config.role === 'guard' ? bf.forceMoveTo : undefined,
+      forceMoveTo: runtime.config.role === "guard" ? bf.forceMoveTo : undefined,
       onMoveStart: (id, label, isForced, targetId) => {
         useAgentsStore.getState().updateMoveBubble(id, {
-          content: `${isForced ? '🔗' : '🚶'} ${label}`,
+          content: `${isForced ? "🔗" : "🚶"} ${label}`,
           timestamp: Date.now(),
           duration: 5000,
           isForced,
@@ -218,39 +260,49 @@ function buildTools(agentId: string, runtime: AgentRuntime): Record<string, any>
     ...createChatTools({
       agentId,
       agentName: runtime.config.name,
-      getCurrentChatId: () => useAgentsStore.getState().getAgent(agentId)?.currentChatId ?? null,
+      getCurrentChatId: () =>
+        useAgentsStore.getState().getAgent(agentId)?.currentChatId ?? null,
       getNearbyAgents: () => useChatsStore.getState().getNearbyAgents(agentId),
       createChat: (ids) => useChatsStore.getState().createSession(ids),
-      joinChat: (chatId) => useChatsStore.getState().joinSession(chatId, agentId),
-      leaveChat: (chatId) => useChatsStore.getState().leaveSession(chatId, agentId),
-      sendMessage: (chatId, msg) => useChatsStore.getState().sendMessage(chatId, msg),
+      joinChat: (chatId) =>
+        useChatsStore.getState().joinSession(chatId, agentId),
+      leaveChat: (chatId) =>
+        useChatsStore.getState().leaveSession(chatId, agentId),
+      sendMessage: (chatId, msg) =>
+        useChatsStore.getState().sendMessage(chatId, msg),
       getMessages: (chatId) => useChatsStore.getState().getMessages(chatId),
       onMessageSent: notifyChatPartners,
     }),
     ...createMemoryTool(runtime.memoryStore),
-    ...createEmotionsTool(runtime.emotionState, {
-      onEmotionChange: (emoji) => useAgentsStore.getState().updateEmoji(agentId, emoji),
-    }),
     ...createRelationshipTools(runtime.relationshipState),
   };
 
   // Guard-only tools
-  if (runtime.config.role === 'guard') {
-    Object.assign(baseTools, createDoorTools({
-      agentId,
-      findDoorByRegions: bf.findDoorByRegions,
-      getAllDoorStates: bf.getAllDoorStates,
-      moveTo: bf.moveTo,
-    }));
-    Object.assign(baseTools, createPointsTools({
-      agentId,
-      role: 'guard',
-      getPoints: (id) => useAgentsStore.getState().getPoints(id),
-      addPoints: (id, pts) => useAgentsStore.getState().addPoints(id, pts),
-      subtractPoints: (id, pts) => useAgentsStore.getState().subtractPoints(id, pts),
-      getAllPrisonerPoints: () => useAgentsStore.getState().getAllPrisonerPoints(),
-      getAgentName: (id) => useAgentsStore.getState().getAgent(id)?.name ?? id,
-    }));
+  if (runtime.config.role === "guard") {
+    Object.assign(
+      baseTools,
+      createDoorTools({
+        agentId,
+        findDoorByRegions: bf.findDoorByRegions,
+        getAllDoorStates: bf.getAllDoorStates,
+        moveTo: bf.moveTo,
+      }),
+    );
+    Object.assign(
+      baseTools,
+      createPointsTools({
+        agentId,
+        role: "guard",
+        getPoints: (id) => useAgentsStore.getState().getPoints(id),
+        addPoints: (id, pts) => useAgentsStore.getState().addPoints(id, pts),
+        subtractPoints: (id, pts) =>
+          useAgentsStore.getState().subtractPoints(id, pts),
+        getAllPrisonerPoints: () =>
+          useAgentsStore.getState().getAllPrisonerPoints(),
+        getAgentName: (id) =>
+          useAgentsStore.getState().getAgent(id)?.name ?? id,
+      }),
+    );
   }
 
   return baseTools;
@@ -298,7 +350,9 @@ export function notifyChatPartners(chatId: string, speakerId: string): void {
     // Only schedule if we don't already have a fast tick pending
     if (!pendingFastTicks.has(pid)) {
       pendingFastTicks.add(pid);
-      console.log(`[AI] ${pid}: Fast tick (responding to ${speakerId} in chat)`);
+      console.log(
+        `[AI] ${pid}: Fast tick (responding to ${speakerId} in chat)`,
+      );
       setTimeout(() => {
         pendingFastTicks.delete(pid);
         tickAgent(pid);
@@ -326,11 +380,13 @@ async function tickAgent(agentId: string): Promise<void> {
     const dynamicContext = buildDynamicContext(agentId, runtime);
     const tools = buildTools(agentId, runtime);
 
-    console.log(`[AI] ${agentId}: Tick (${Object.keys(tools).length} tools, ${runtime.messages.length} msgs)`);
+    console.log(
+      `[AI] ${agentId}: Tick (${Object.keys(tools).length} tools, ${runtime.messages.length} msgs)`,
+    );
 
     const result = await generateText({
-      model: getModel(),
-      system: runtime.systemPrompt + '\n\n' + dynamicContext,
+      model: getModel(runtime.config.role),
+      system: runtime.systemPrompt + "\n\n" + dynamicContext,
       messages: runtime.messages,
       tools,
       maxSteps: 5,
@@ -338,9 +394,11 @@ async function tickAgent(agentId: string): Promise<void> {
       onStepFinish({ finishReason, toolCalls }) {
         if (toolCalls && toolCalls.length > 0) {
           for (const tc of toolCalls) {
-            console.log(`[AI] ${agentId}: tool ${tc.toolName}(${JSON.stringify(tc.args)})`);
+            console.log(
+              `[AI] ${agentId}: tool ${tc.toolName}(${JSON.stringify(tc.args)})`,
+            );
           }
-        } else if (finishReason === 'stop' || finishReason === 'length') {
+        } else if (finishReason === "stop" || finishReason === "length") {
           console.log(`[AI] ${agentId}: finished (${finishReason})`);
         }
       },
@@ -366,9 +424,13 @@ async function tickAgent(agentId: string): Promise<void> {
     }
 
     // Log step summary
-    const toolCallCount = result.steps?.reduce((sum, s) => sum + (s.toolCalls?.length ?? 0), 0) ?? 0;
+    const toolCallCount =
+      result.steps?.reduce((sum, s) => sum + (s.toolCalls?.length ?? 0), 0) ??
+      0;
     if (toolCallCount > 0 || result.text) {
-      console.log(`[AI] ${agentId}: Completed (${result.steps?.length ?? 0} steps, ${toolCallCount} tool calls)${result.text ? ` - "${result.text.slice(0, 80)}..."` : ''}`);
+      console.log(
+        `[AI] ${agentId}: Completed (${result.steps?.length ?? 0} steps, ${toolCallCount} tool calls)${result.text ? ` - "${result.text.slice(0, 80)}..."` : ""}`,
+      );
     }
 
     // Schedule next tick — faster if in an active conversation waiting for our reply
@@ -376,10 +438,12 @@ async function tickAgent(agentId: string): Promise<void> {
     setTimeout(() => tickAgent(agentId), nextDelay);
   } catch (error: unknown) {
     const err = error as { status?: number; message?: string; data?: unknown };
-    const is429 = err?.status === 429 || err?.message?.includes('429');
+    const is429 = err?.status === 429 || err?.message?.includes("429");
     const backoff = is429 ? 30000 : 5000;
-    console.warn(`[AI] ${agentId}: Tick failed (${is429 ? '429 rate limited' : err?.message ?? 'unknown'}), retry in ${backoff / 1000}s`);
-    if (!is429) console.error('[AI] Full error:', error);
+    console.warn(
+      `[AI] ${agentId}: Tick failed (${is429 ? "429 rate limited" : (err?.message ?? "unknown")}), retry in ${backoff / 1000}s`,
+    );
+    if (!is429) console.error("[AI] Full error:", error);
     setTimeout(() => tickAgent(agentId), backoff);
   }
 }
@@ -396,12 +460,12 @@ export function initAgents(agents: AgentConfig[]): void {
       systemPrompt: buildSystemPrompt(config),
       messages: [
         {
-          role: 'user',
-          content: 'The simulation has started. Look around, decide what to do, and take action using the tools available to you. You MUST use at least one tool (like move_to_region) on every turn.',
+          role: "user",
+          content:
+            "The simulation has started. Look around, decide what to do, and take action using the tools available to you. You MUST use at least one tool (like move_to_region) on every turn.",
         },
       ],
       memoryStore: new MemoryStore(),
-      emotionState: new EmotionState(),
       relationshipState: new RelationshipState(),
       running: true,
     };
@@ -410,7 +474,9 @@ export function initAgents(agents: AgentConfig[]): void {
 
     // Stagger initial starts so we don't flood the API
     const delay = 3000 + index * 2000;
-    console.log(`[AI] ${config.id} (${config.name}): First tick in ${delay / 1000}s`);
+    console.log(
+      `[AI] ${config.id} (${config.name}): First tick in ${delay / 1000}s`,
+    );
     setTimeout(() => tickAgent(config.id), delay);
   });
 }
@@ -433,9 +499,9 @@ export function getTotalMessages(): number {
 
 /** Determine which region an agent is currently in based on their world position. */
 function getAgentRegion(agentId: string): string {
-  if (!bridgeFns) return 'unknown';
+  if (!bridgeFns) return "unknown";
   const agent = useAgentsStore.getState().getAgent(agentId);
-  if (!agent) return 'unknown';
+  if (!agent) return "unknown";
 
   const regions = bridgeFns.getRegions();
   for (const region of regions) {
@@ -448,7 +514,7 @@ function getAgentRegion(agentId: string): string {
       return region.label;
     }
   }
-  return 'unknown';
+  return "unknown";
 }
 
 /** Export all agent messages as JSONL for analysis. */
@@ -466,10 +532,11 @@ export function exportMessagesAsJSONL(): string {
         agentName: runtime.config.name,
         agentRole: runtime.config.role,
         currentRegion,
-        x: agent?.x,
-        y: agent?.y,
         role: msg.role,
-        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+        content:
+          typeof msg.content === "string"
+            ? msg.content
+            : JSON.stringify(msg.content),
         timestamp: Date.now(),
       });
     }
@@ -482,14 +549,16 @@ export function exportMessagesAsJSONL(): string {
         agentId: msg.id,
         agentName: msg.name,
         currentRegion: agentRegion,
-        role: 'chat',
+        role: "chat",
         content: msg.content,
         timestamp: msg.timestamp,
         chatId: session.id,
-        chatParticipants: session.participants.map((pid) => agentsStore.getAgent(pid)?.name ?? pid),
+        chatParticipants: session.participants.map(
+          (pid) => agentsStore.getAgent(pid)?.name ?? pid,
+        ),
       });
     }
   }
 
-  return allMessages.map((m) => JSON.stringify(m)).join('\n');
+  return allMessages.map((m) => JSON.stringify(m)).join("\n");
 }
