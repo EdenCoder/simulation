@@ -14,7 +14,7 @@ import { useAgentsStore } from "@/store/agents";
 import { useChatsStore } from "@/store/chats";
 
 import { RateLimiter } from "./rate-limiter";
-import { getTimeContext } from "./context/time";
+import { getTimeContext, getCurrentGameTime } from "./context/time";
 import { getNearbyContext } from "./context/nearby";
 
 import { createMoveTools } from "./tools/move";
@@ -29,6 +29,79 @@ import { createPointsTools, getPointsContext } from "./tools/points";
 
 import { getPrisonerPrompt } from "@/scenarios/prison/prompts/prisoner";
 import { getGuardPrompt } from "@/scenarios/prison/prompts/guard";
+
+// --- Persistent message log entry (never trimmed) ---
+
+interface MessageLogEntry {
+  agentId: string;
+  agentName: string;
+  agentRole: string;
+  currentRegion: string;
+  role: string;
+  content: string;
+  timestamp: number;
+}
+
+/** Append-only log of all LLM messages across the simulation. Never trimmed. */
+const messageLog: MessageLogEntry[] = [];
+
+// --- Hourly C-score snapshots ---
+
+interface CScoreSnapshot {
+  simulationTime: string;
+  realTimestamp: number;
+  scores: Array<{ id: string; name: string; points: number; region: string }>;
+}
+
+const cScoreSnapshots: CScoreSnapshot[] = [];
+let lastSnapshotHour: number | null = null;
+
+/**
+ * Check whether the simulation clock has crossed an hour boundary since
+ * the last snapshot, and if so, record a C-score snapshot.
+ */
+function checkHourlyCScoreSnapshot(): void {
+  const simTime = getCurrentGameTime();
+  if (!simTime) return;
+
+  const currentHour = simTime.getHours();
+  if (lastSnapshotHour === null) {
+    // First call — record the starting hour but don't snapshot yet
+    lastSnapshotHour = currentHour;
+    return;
+  }
+
+  if (currentHour === lastSnapshotHour) return;
+
+  // Hour changed — take a snapshot
+  lastSnapshotHour = currentHour;
+
+  const agentsStore = useAgentsStore.getState();
+  const prisoners = agentsStore
+    .getAllAgents()
+    .filter((a) => a.role === "prisoner");
+
+  const hours = simTime.getHours();
+  const minutes = simTime.getMinutes().toString().padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+  const h12 = hours % 12 || 12;
+
+  cScoreSnapshots.push({
+    simulationTime: `${h12}:${minutes} ${ampm}`,
+    realTimestamp: Date.now(),
+    scores: prisoners.map((p) => ({
+      id: p.id,
+      name: p.name,
+      points: p.points,
+      region: getAgentRegion(p.id),
+    })),
+  });
+
+  console.log(
+    `[AI] C-Score snapshot at ${h12}:${minutes} ${ampm}:`,
+    prisoners.map((p) => `${p.name}=${p.points}`).join(", "),
+  );
+}
 
 // --- State per agent ---
 
@@ -68,6 +141,7 @@ export interface BridgeFunctions {
     isLocked: boolean;
   }>;
   getRegions: () => RegionConfig[];
+  getAgentWorldPosition: (agentId: string) => { x: number; y: number } | null;
 }
 
 let bridgeFns: BridgeFunctions | null = null;
@@ -407,12 +481,33 @@ async function tickAgent(agentId: string): Promise<void> {
     // Append all response messages to history for continuity
     if (result.response?.messages) {
       runtime.messages.push(...result.response.messages);
+
+      // Persist to the append-only log (never trimmed)
+      const region = getAgentRegion(agentId);
+      const now = Date.now();
+      for (const msg of result.response.messages) {
+        messageLog.push({
+          agentId,
+          agentName: runtime.config.name,
+          agentRole: runtime.config.role,
+          currentRegion: region,
+          role: msg.role,
+          content:
+            typeof msg.content === "string"
+              ? msg.content
+              : JSON.stringify(msg.content),
+          timestamp: now,
+        });
+      }
     }
 
     // Trim history to prevent context overflow
     if (runtime.messages.length > 40) {
       runtime.messages = runtime.messages.slice(-30);
     }
+
+    // Check for hourly C-score snapshot
+    checkHourlyCScoreSnapshot();
 
     // Show the agent's final text as a thought bubble
     if (result.text) {
@@ -472,6 +567,18 @@ export function initAgents(agents: AgentConfig[]): void {
 
     agentRuntimes.set(config.id, runtime);
 
+    // Persist the initial message to the log
+    messageLog.push({
+      agentId: config.id,
+      agentName: config.name,
+      agentRole: config.role,
+      currentRegion: "unknown", // bridge not ready yet at init time
+      role: "user",
+      content:
+        "The simulation has started. Look around, decide what to do, and take action using the tools available to you. You MUST use at least one tool (like move_to_region) on every turn.",
+      timestamp: Date.now(),
+    });
+
     // Stagger initial starts so we don't flood the API
     const delay = 3000 + index * 2000;
     console.log(
@@ -500,16 +607,18 @@ export function getTotalMessages(): number {
 /** Determine which region an agent is currently in based on their world position. */
 function getAgentRegion(agentId: string): string {
   if (!bridgeFns) return "unknown";
-  const agent = useAgentsStore.getState().getAgent(agentId);
-  if (!agent) return "unknown";
+
+  // Use world-space coordinates from the Phaser sprite (not screen coords from Zustand)
+  const worldPos = bridgeFns.getAgentWorldPosition(agentId);
+  if (!worldPos) return "unknown";
 
   const regions = bridgeFns.getRegions();
   for (const region of regions) {
     if (
-      agent.x >= region.x &&
-      agent.x <= region.x + region.width &&
-      agent.y >= region.y &&
-      agent.y <= region.y + region.height
+      worldPos.x >= region.x &&
+      worldPos.x <= region.x + region.width &&
+      worldPos.y >= region.y &&
+      worldPos.y <= region.y + region.height
     ) {
       return region.label;
     }
@@ -519,33 +628,19 @@ function getAgentRegion(agentId: string): string {
 
 /** Export all agent messages as JSONL for analysis. */
 export function exportMessagesAsJSONL(): string {
-  const allMessages: Array<Record<string, unknown>> = [];
+  const allLines: Array<Record<string, unknown>> = [];
   const agentsStore = useAgentsStore.getState();
 
-  for (const [agentId, runtime] of agentRuntimes) {
-    const agent = agentsStore.getAgent(agentId);
-    const currentRegion = getAgentRegion(agentId);
-
-    for (const msg of runtime.messages) {
-      allMessages.push({
-        agentId,
-        agentName: runtime.config.name,
-        agentRole: runtime.config.role,
-        currentRegion,
-        role: msg.role,
-        content:
-          typeof msg.content === "string"
-            ? msg.content
-            : JSON.stringify(msg.content),
-        timestamp: Date.now(),
-      });
-    }
+  // 1. All LLM messages from the persistent log (complete history, never trimmed)
+  for (const entry of messageLog) {
+    allLines.push({ ...entry });
   }
 
+  // 2. All chat messages
   for (const session of useChatsStore.getState().getAllSessions()) {
     for (const msg of session.messages) {
       const agentRegion = getAgentRegion(msg.id);
-      allMessages.push({
+      allLines.push({
         agentId: msg.id,
         agentName: msg.name,
         currentRegion: agentRegion,
@@ -560,5 +655,40 @@ export function exportMessagesAsJSONL(): string {
     }
   }
 
-  return allMessages.map((m) => JSON.stringify(m)).join("\n");
+  // 3. Hourly C-score snapshots
+  for (const snapshot of cScoreSnapshots) {
+    allLines.push({
+      role: "cscore_snapshot",
+      simulationTime: snapshot.simulationTime,
+      timestamp: snapshot.realTimestamp,
+      scores: snapshot.scores,
+    });
+  }
+
+  // 4. Final C-score snapshot at download time
+  const simTime = getCurrentGameTime();
+  const prisoners = agentsStore
+    .getAllAgents()
+    .filter((a) => a.role === "prisoner");
+
+  if (simTime) {
+    const hours = simTime.getHours();
+    const minutes = simTime.getMinutes().toString().padStart(2, "0");
+    const ampm = hours >= 12 ? "PM" : "AM";
+    const h12 = hours % 12 || 12;
+
+    allLines.push({
+      role: "cscore_snapshot",
+      simulationTime: `${h12}:${minutes} ${ampm} (at download)`,
+      timestamp: Date.now(),
+      scores: prisoners.map((p) => ({
+        id: p.id,
+        name: p.name,
+        points: p.points,
+        region: getAgentRegion(p.id),
+      })),
+    });
+  }
+
+  return allLines.map((m) => JSON.stringify(m)).join("\n");
 }

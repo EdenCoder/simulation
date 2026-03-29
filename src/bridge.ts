@@ -3,9 +3,9 @@
  * Provides movement, door operations, and region queries.
  */
 
-import type { Agent } from './sprites/Agent';
-import type { Door } from './sprites/Door';
-import type { RegionConfig } from './engine/types';
+import type { Agent } from "./sprites/Agent";
+import type { Door } from "./sprites/Door";
+import type { RegionConfig } from "./engine/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let agentManager: any = null;
@@ -40,8 +40,12 @@ function getRegions(): RegionConfig[] {
 export function findDoorByRegions(region1: string, region2: string) {
   const doors = getDoors();
   const regions = getRegions();
-  const r1 = regions.find((r) => r.label.toLowerCase().trim() === region1.toLowerCase().trim());
-  const r2 = regions.find((r) => r.label.toLowerCase().trim() === region2.toLowerCase().trim());
+  const r1 = regions.find(
+    (r) => r.label.toLowerCase().trim() === region1.toLowerCase().trim(),
+  );
+  const r2 = regions.find(
+    (r) => r.label.toLowerCase().trim() === region2.toLowerCase().trim(),
+  );
   if (!r1 || !r2) return null;
 
   const THRESHOLD = 50;
@@ -56,8 +60,14 @@ export function findDoorByRegions(region1: string, region2: string) {
     if (isNear(r1) && isNear(r2)) {
       return {
         door,
-        lock: (d: unknown) => { (d as Door).setDoorLocked(true); return true; },
-        unlock: (d: unknown) => { (d as Door).setDoorLocked(false); return true; },
+        lock: (d: unknown) => {
+          (d as Door).setDoorLocked(true);
+          return true;
+        },
+        unlock: (d: unknown) => {
+          (d as Door).setDoorLocked(false);
+          return true;
+        },
       };
     }
   }
@@ -75,10 +85,15 @@ export function unlockDoor(door: Door): boolean {
 }
 
 /** Get all doors with their lock states and connected regions. */
-export function getAllDoorsWithStates(): Array<{ region1: string; region2: string; isLocked: boolean }> {
+export function getAllDoorsWithStates(): Array<{
+  region1: string;
+  region2: string;
+  isLocked: boolean;
+}> {
   const doors = getDoors();
   const regions = getRegions();
-  const result: Array<{ region1: string; region2: string; isLocked: boolean }> = [];
+  const result: Array<{ region1: string; region2: string; isLocked: boolean }> =
+    [];
   const THRESHOLD = 50;
 
   for (const door of doors) {
@@ -95,27 +110,53 @@ export function getAllDoorsWithStates(): Array<{ region1: string; region2: strin
     }
     if (connected.length >= 2) {
       const sorted = [...connected].sort();
-      result.push({ region1: sorted[0], region2: sorted[1], isLocked: door.isDoorLocked() });
+      result.push({
+        region1: sorted[0],
+        region2: sorted[1],
+        isLocked: door.isDoorLocked(),
+      });
     }
   }
   return result;
 }
 
-export async function moveTo(agentId: string, x: number, y: number): Promise<boolean> {
+export async function moveTo(
+  agentId: string,
+  x: number,
+  y: number,
+): Promise<boolean> {
   if (!agentManager) return false;
   const agent = agentManager.getAgentById(agentId) as Agent | undefined;
   if (!agent) return false;
   return agent.setTarget(x, y);
 }
 
-export async function forceMoveTo(guardId: string, prisonerId: string, x: number, y: number): Promise<boolean> {
+export async function forceMoveTo(
+  guardId: string,
+  prisonerId: string,
+  x: number,
+  y: number,
+): Promise<boolean> {
   if (!agentManager) return false;
   const guard = agentManager.getAgentById(guardId) as Agent | undefined;
   const prisoner = agentManager.getAgentById(prisonerId) as Agent | undefined;
   if (!guard || !prisoner) return false;
 
-  const [gs, ps] = await Promise.all([guard.setTarget(x, y, true), prisoner.setTarget(x, y, true)]);
+  const [gs, ps] = await Promise.all([
+    guard.setTarget(x, y, true),
+    prisoner.setTarget(x, y, true),
+  ]);
   return gs && ps;
+}
+
+/** Get an agent's world-space position from the Phaser sprite. */
+export function getAgentWorldPosition(
+  agentId: string,
+): { x: number; y: number } | null {
+  if (!agentManager) return null;
+  const agent = agentManager.getAgentById(agentId) as Agent | undefined;
+  if (!agent) return null;
+  return { x: agent.x, y: agent.y };
 }
 
 /** Return all bridge functions as a bundle for the AI agent runner. */
@@ -126,5 +167,6 @@ export function getBridgeFunctions() {
     findDoorByRegions,
     getAllDoorStates: getAllDoorsWithStates,
     getRegions,
+    getAgentWorldPosition,
   };
 }
