@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 @source "../src/**/*.{ts,tsx}";
 
 @plugin "tailwindcss-animate";
@@ -54,12 +54,20 @@
   --animate-accordion-up: accordion-up 0.2s ease-out;
 
   @keyframes accordion-down {
-    from { height: 0; }
-    to { height: var(--radix-accordion-content-height); }
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
   }
   @keyframes accordion-up {
-    from { height: var(--radix-accordion-content-height); }
-    to { height: 0; }
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
   }
 }
 
@@ -95,7 +103,7 @@ canvas {
 /* Game card components */
 @layer components {
   .game-card {
-    @apply bg-white !border-2 !border-gray-800 !rounded px-2 py-1 !text-xs !font-mono shadow-lg;
+    @apply bg-white text-black !border-2 !border-gray-800 !rounded px-2 py-1 !text-xs !font-mono shadow-lg;
   }
 
   .game-card.game-card--speech {
@@ -126,8 +134,8 @@ canvas {
     @apply !px-2 !py-3 !shadow-none !gap-y-3;
   }
 
-  .game-card--modal > [data-slot='card-header'],
-  .game-card--modal > [data-slot='card-content'] {
+  .game-card--modal > [data-slot="card-header"],
+  .game-card--modal > [data-slot="card-content"] {
     @apply !p-0;
   }
 
