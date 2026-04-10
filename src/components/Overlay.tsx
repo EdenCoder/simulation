@@ -33,14 +33,21 @@ export const Overlay: React.FC = () => {
             const lines: Array<{
               chatId: string;
               from: string;
+              to: string[];
               message: string;
               timestamp: number;
             }> = [];
             for (const session of sessions) {
               for (const msg of session.messages) {
+                const senderName =
+                  agentsStore.getAgent(msg.id)?.name ?? msg.name;
+                const recipients = session.participants
+                  .filter((pid) => pid !== msg.id)
+                  .map((pid) => agentsStore.getAgent(pid)?.name ?? pid);
                 lines.push({
                   chatId: session.id,
-                  from: agentsStore.getAgent(msg.id)?.name ?? msg.name,
+                  from: senderName,
+                  to: recipients,
                   message: msg.content,
                   timestamp: msg.timestamp,
                 });
