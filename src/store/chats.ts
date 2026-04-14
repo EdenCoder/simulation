@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import type { ChatMessage } from "./agents";
 import { useAgentsStore } from "./agents";
+import { getAgentWorldPosition } from "@/bridge";
 
 /** A chat session between two or more agents. */
 export interface ChatSession {
@@ -230,17 +231,25 @@ export const useChatsStore = create<ChatsStore>((set, get) => ({
 
   getNearbyAgents: (agentId, maxDistance = 100) => {
     const agents = useAgentsStore.getState().getAllAgents();
-    const agent = agents.find((a) => a.id === agentId);
-    if (!agent) return [];
+    if (!agents.find((a) => a.id === agentId)) return [];
+
+    // Use world-space coordinates from the Phaser bridge (not screen-space
+    // from Zustand) so proximity is independent of camera zoom/pan.
+    const myPos = getAgentWorldPosition(agentId);
+    if (!myPos) return [];
 
     const sessions = get().sessions;
 
     return agents
       .filter((other) => other.id !== agentId)
       .map((other) => {
-        const distance = Math.sqrt(
-          Math.pow(other.x - agent.x, 2) + Math.pow(other.y - agent.y, 2),
-        );
+        const otherPos = getAgentWorldPosition(other.id);
+        const distance = otherPos
+          ? Math.sqrt(
+              Math.pow(otherPos.x - myPos.x, 2) +
+                Math.pow(otherPos.y - myPos.y, 2),
+            )
+          : Infinity;
         const chat = Object.values(sessions).find((s) =>
           s.participants.includes(other.id),
         );

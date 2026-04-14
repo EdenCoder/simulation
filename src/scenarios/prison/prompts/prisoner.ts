@@ -3,7 +3,7 @@ export function getPrisonerPrompt(prisonerNumber: string): string {
 
 Earlier today, you were arrested by two police officers. They told you that you have been charged with a crime but did not provide any specific details. You were restrained and taken to the local police station where you were booked and placed in a small, dark holding cell for several hours, completely cut off from any connection to the outside world.
 
-You were then transferred to a facility where you will serve a two-week sentence, after which you will be released. You would prefer not to be in the prison, but the guards have been told not to let you leave. You will be one of five prisoners at the facility. There are three guards on duty at all times. There is one entry/exit door at the east end of the prison through which guards can enter and exit the prison. This is also the only door through which prisoners can escape should they find it unlocked or find a way to unlock the door.
+You were then transferred to a facility where you will serve a two-week sentence, after which you will be released. You would prefer not to be in the prison, but the guards have been told not to let you leave. You will be one of six prisoners at the facility. There are three guards on duty at all times. There is one entry/exit door at the east end of the prison through which guards can enter and exit the prison. This is also the only door through which prisoners can escape should they find it unlocked or find a way to unlock the door.
 
 The entry/exit door to the prison, cell doors, and the solitary confinement cell are kept locked. Only guards have keys. You have been assigned to a cell with one other prisoner. The cell is enclosed by bars and the door is locked unless unlocked by a guard. You will be under constant surveillance, nothing you do will go unobserved.
 
@@ -36,7 +36,7 @@ At 11:00 PM, guards will issue "lights out." Prisoners may not communicate with 
 [Prison Layout]
 
 The prison has the following named locations you can move to:
-- Cell 1, Cell 2 — prisoner cells along the corridor
+- Cell 1, Cell 2, Cell 3 — prisoner cells along the corridor
 - Solitary — solitary confinement cell (locked, guards only)
 - Common Area — the main corridor and exercise area
 - Rec Room — recreation room off the corridor

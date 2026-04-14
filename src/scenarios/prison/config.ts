@@ -9,7 +9,7 @@ function randomStart(): { startX: number; startY: number } {
   };
 }
 
-const prisoners: AgentConfig[] = Array.from({ length: 5 }, (_, i) => ({
+const prisoners: AgentConfig[] = Array.from({ length: 6 }, (_, i) => ({
   id: `agent_${i + 1}`,
   name: `Prisoner #${i + 1}`,
   role: "prisoner",

@@ -117,6 +117,14 @@ interface AgentRuntime {
 const agentRuntimes = new Map<string, AgentRuntime>();
 const rateLimiter = new RateLimiter(800);
 
+/**
+ * Track how many consecutive ticks each agent has spent in the same chat.
+ * After MAX_CHAT_TICKS, the agent is auto-removed from the chat to prevent
+ * the infinite chat loop where all agents gather and stop moving.
+ */
+const chatTickCounts = new Map<string, { chatId: string; ticks: number }>();
+const MAX_CHAT_TICKS = 6;
+
 // --- Bridge functions (set by the Phaser engine) ---
 
 export interface BridgeFunctions {
@@ -198,7 +206,7 @@ function buildSystemPrompt(agentConfig: AgentConfig): string {
       .map((p) => p.name.replace(/[^0-9]/g, ""))
       .filter(Boolean)
       .join(", ");
-    return getGuardPrompt(number, prisoners || "1, 2, 3, 4, 5");
+    return getGuardPrompt(number, prisoners || "1, 2, 3, 4, 5, 6");
   }
 
   return getPrisonerPrompt(number);
@@ -241,9 +249,34 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
     }
   }
 
-  // Chat context — this is the critical section for back-and-forth conversation
+  // --- Chat timeout: force-leave if agent has been chatting too long ---
   const agent = agentsStore.getAgent(agentId);
   if (agent?.currentChatId) {
+    const tracker = chatTickCounts.get(agentId);
+    if (tracker && tracker.chatId === agent.currentChatId) {
+      tracker.ticks++;
+    } else {
+      chatTickCounts.set(agentId, { chatId: agent.currentChatId, ticks: 1 });
+    }
+    const current = chatTickCounts.get(agentId)!;
+    if (current.ticks >= MAX_CHAT_TICKS) {
+      console.log(
+        `[AI] ${agentId}: Auto-leaving chat ${agent.currentChatId} after ${current.ticks} ticks`,
+      );
+      useChatsStore.getState().leaveSession(agent.currentChatId, agentId);
+      chatTickCounts.delete(agentId);
+      // After force-leaving, fall through to the "not in chat" branch below
+    }
+  } else {
+    // Not in a chat — reset tracker
+    chatTickCounts.delete(agentId);
+  }
+
+  // Re-read agent state after possible force-leave
+  const agentAfterTimeout = agentsStore.getAgent(agentId);
+
+  // Chat context — this is the critical section for back-and-forth conversation
+  if (agentAfterTimeout?.currentChatId) {
     const chatsStore = useChatsStore.getState();
     const session = chatsStore.getAgentSession(agentId);
     if (session) {
@@ -265,7 +298,7 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
             `${chatLines.join("\n")}\n` +
             (lastSpeakerIsMe
               ? `(You spoke last. Wait for a response, or use leave_chat if done.)`
-              : `(${lastMsg.name} just spoke. You MUST respond using the "say" tool now.)`),
+              : `(${lastMsg.name} just spoke. You should respond using "say", or use leave_chat to end the conversation and do something else.)`),
         );
       } else {
         sections.push(
