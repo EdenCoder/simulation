@@ -75,35 +75,17 @@ export function createChatTools(deps: ChatDeps) {
 
     say: tool({
       description:
-        "Say something in a conversation. If you are not already in a chat, one will automatically be started with the closest nearby agent.",
+        "Say something in your current conversation. You must have an active chat (use start_chat first).",
       parameters: z.object({
         message: z.string().describe("What you want to say aloud"),
       }),
       execute: async ({ message }) => {
-        let chatId = deps.getCurrentChatId();
-
-        // Auto-start a chat with the closest nearby agent if not in one
+        const chatId = deps.getCurrentChatId();
         if (!chatId) {
-          const nearby = deps.getNearbyAgents();
-          if (nearby.length === 0) {
-            return { success: false, outcome: "No one is nearby to talk to." };
-          }
-
-          const closest = nearby[0]; // Already sorted by distance ascending
-
-          // If closest agent is already in a chat, join it; otherwise create a new one
-          const chatResult = closest.inChat
-            ? deps.joinChat(closest.inChat)
-            : deps.createChat([deps.agentId, closest.id]);
-
-          if (!chatResult.success) return chatResult;
-
-          chatId = deps.getCurrentChatId();
-          if (!chatId)
-            return {
-              success: false,
-              outcome: "Failed to start a conversation.",
-            };
+          return {
+            success: false,
+            outcome: "You are not in a conversation. Use start_chat first.",
+          };
         }
 
         const result = deps.sendMessage(chatId, {

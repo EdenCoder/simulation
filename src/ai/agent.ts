@@ -298,7 +298,7 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
             `${chatLines.join("\n")}\n` +
             (lastSpeakerIsMe
               ? `(You spoke last. Wait for a response, or use leave_chat if done.)`
-              : `(${lastMsg.name} just spoke. You should respond using "say", or use leave_chat to end the conversation and do something else.)`),
+              : `(${lastMsg.name} just spoke. You MUST respond using the "say" tool now.)`),
         );
       } else {
         sections.push(

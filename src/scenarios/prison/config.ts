@@ -1,8 +1,12 @@
 import type { AgentConfig, ScenarioConfig } from "@/engine/types";
 
-/** Generate a random starting position within the common area. */
+/** Generate a random starting position within guards or common area. */
 function randomStart(): { startX: number; startY: number } {
-  const area = { x: 192, y: 208, w: 336, h: 80 }; // Common area
+  const areas = [
+    { x: 48, y: 144, w: 144, h: 176 }, // Guards area
+    { x: 192, y: 208, w: 336, h: 80 }, // Common area
+  ];
+  const area = areas[Math.random() < 0.5 ? 0 : 1];
   return {
     startX: area.x + Math.random() * area.w,
     startY: area.y + Math.random() * area.h,
