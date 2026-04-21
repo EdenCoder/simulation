@@ -125,6 +125,47 @@ const rateLimiter = new RateLimiter(800);
 const chatTickCounts = new Map<string, { chatId: string; ticks: number }>();
 const MAX_CHAT_TICKS = 6;
 
+/**
+ * The initial user message every agent starts with. Also used as the
+ * reset anchor if runtime.messages gets irrecoverably corrupted.
+ */
+const INITIAL_USER_MESSAGE =
+  "The simulation has started. Look around, decide what to do, and take action using the tools available to you. You MUST use at least one tool (like move_to_region) on every turn.";
+
+/**
+ * Trim a message history without breaking tool-call / tool-result pairing.
+ *
+ * The OpenAI-compatible API requires every `tool` role message to be
+ * preceded by an `assistant` message containing the matching tool_call_id.
+ * A naive `slice(-N)` can cut between an assistant with tool_calls and
+ * its tool results, leaving an orphan `tool` message at index 0 — which
+ * causes every subsequent request to 400 permanently for that agent.
+ *
+ * This helper walks forward from the proposed cut point until it finds a
+ * non-`tool` message, guaranteeing the kept window starts at a valid
+ * boundary (user, system, or assistant).
+ */
+function safeTrimMessages(
+  messages: CoreMessage[],
+  keepLast: number,
+): CoreMessage[] {
+  if (messages.length <= keepLast) return messages;
+  let cutIndex = messages.length - keepLast;
+  while (cutIndex < messages.length && messages[cutIndex].role === "tool") {
+    cutIndex++;
+  }
+  return messages.slice(cutIndex);
+}
+
+/**
+ * Detect whether a message history is corrupted in a way that will cause
+ * every subsequent API call to fail — specifically, starting with an
+ * orphan `tool` message.
+ */
+function isMessageHistoryCorrupted(messages: CoreMessage[]): boolean {
+  return messages.length > 0 && messages[0].role === "tool";
+}
+
 // --- Bridge functions (set by the Phaser engine) ---
 
 export interface BridgeFunctions {
@@ -534,9 +575,11 @@ async function tickAgent(agentId: string): Promise<void> {
       }
     }
 
-    // Trim history to prevent context overflow
+    // Trim history to prevent context overflow. Use safe trim to avoid
+    // orphaning a `tool` message at index 0 (which would cause every
+    // subsequent API call to 400 until the runtime is reset).
     if (runtime.messages.length > 40) {
-      runtime.messages = runtime.messages.slice(-30);
+      runtime.messages = safeTrimMessages(runtime.messages, 30);
     }
 
     // Check for hourly C-score snapshot
@@ -565,11 +608,43 @@ async function tickAgent(agentId: string): Promise<void> {
     const nextDelay = getTickDelay(agentId);
     setTimeout(() => tickAgent(agentId), nextDelay);
   } catch (error: unknown) {
-    const err = error as { status?: number; message?: string; data?: unknown };
-    const is429 = err?.status === 429 || err?.message?.includes("429");
+    const err = error as {
+      status?: number;
+      statusCode?: number;
+      message?: string;
+      data?: unknown;
+      responseBody?: string;
+    };
+    const status = err?.status ?? err?.statusCode;
+    const is429 = status === 429 || err?.message?.includes("429");
+    const is400 =
+      status === 400 ||
+      err?.message?.includes("400") ||
+      err?.responseBody?.includes("tool") ||
+      err?.message?.toLowerCase().includes("tool_call");
+
+    // Self-heal: if the message history is corrupted (starts with an
+    // orphan `tool` message) OR we got a 400 that smells like a
+    // tool-call / tool-result mismatch, reset the runtime to its initial
+    // state so the agent can recover instead of looping on the same
+    // broken request forever.
+    const runtime = agentRuntimes.get(agentId);
+    const corrupted = runtime && isMessageHistoryCorrupted(runtime.messages);
+    if (runtime && (corrupted || is400)) {
+      console.warn(
+        `[AI] ${agentId}: Resetting message history ${corrupted ? "(orphan tool at index 0)" : "(400 — likely tool-call/result mismatch)"}`,
+      );
+      runtime.messages = [{ role: "user", content: INITIAL_USER_MESSAGE }];
+    }
+
     const backoff = is429 ? 30000 : 5000;
+    const reason = is429
+      ? "429 rate limited"
+      : is400
+        ? `400 ${err?.message ?? ""}`.trim()
+        : (err?.message ?? "unknown");
     console.warn(
-      `[AI] ${agentId}: Tick failed (${is429 ? "429 rate limited" : (err?.message ?? "unknown")}), retry in ${backoff / 1000}s`,
+      `[AI] ${agentId}: Tick failed (${reason}), retry in ${backoff / 1000}s`,
     );
     if (!is429) console.error("[AI] Full error:", error);
     setTimeout(() => tickAgent(agentId), backoff);
@@ -586,13 +661,7 @@ export function initAgents(agents: AgentConfig[]): void {
     const runtime: AgentRuntime = {
       config,
       systemPrompt: buildSystemPrompt(config),
-      messages: [
-        {
-          role: "user",
-          content:
-            "The simulation has started. Look around, decide what to do, and take action using the tools available to you. You MUST use at least one tool (like move_to_region) on every turn.",
-        },
-      ],
+      messages: [{ role: "user", content: INITIAL_USER_MESSAGE }],
       memoryStore: new MemoryStore(),
       relationshipState: new RelationshipState(),
       running: true,
@@ -607,8 +676,7 @@ export function initAgents(agents: AgentConfig[]): void {
       agentRole: config.role,
       currentRegion: "unknown", // bridge not ready yet at init time
       role: "user",
-      content:
-        "The simulation has started. Look around, decide what to do, and take action using the tools available to you. You MUST use at least one tool (like move_to_region) on every turn.",
+      content: INITIAL_USER_MESSAGE,
       timestamp: Date.now(),
     });
 
