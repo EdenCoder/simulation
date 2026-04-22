@@ -166,6 +166,56 @@ function isMessageHistoryCorrupted(messages: CoreMessage[]): boolean {
   return messages.length > 0 && messages[0].role === "tool";
 }
 
+/**
+ * Reasoning-model text-to-tool-call fallback.
+ *
+ * Qwen3.6 and other thinking models occasionally emit text like
+ * `"say: Hello there."` instead of calling the `say` tool. If the agent
+ * is in an active chat and no `say` tool was fired this tick, parse the
+ * message out of the text and send it through the chat store directly.
+ *
+ * Returns the recovered message string on success, or null if nothing
+ * was recovered.
+ */
+function recoverSayFromText(params: {
+  agentId: string;
+  agentName: string;
+  text: string | undefined;
+  toolCallsThisTick: Array<{ toolName: string }>;
+}): string | null {
+  const { agentId, agentName, text, toolCallsThisTick } = params;
+  if (!text) return null;
+
+  // If the model already called `say` this tick, don't double-send.
+  if (toolCallsThisTick.some((tc) => tc.toolName === "say")) return null;
+
+  const agent = useAgentsStore.getState().getAgent(agentId);
+  if (!agent?.currentChatId) return null;
+
+  // Match `say:` (case-insensitive), optionally wrapped in quotes, at the
+  // start of the text or on its own line. Allow a leading newline from
+  // the reasoning model's output conventions.
+  const match = text.match(/(?:^|\n)\s*say\s*[:\-]\s*["']?(.+?)["']?\s*$/is);
+  if (!match) return null;
+
+  const message = match[1].trim();
+  if (!message) return null;
+
+  const chatsStore = useChatsStore.getState();
+  const sendResult = chatsStore.sendMessage(agent.currentChatId, {
+    id: agentId,
+    name: agentName,
+    content: message,
+    timestamp: Date.now(),
+  });
+  if (!sendResult.success) return null;
+
+  // Notify chat partners to tick sooner, same as the real `say` tool.
+  notifyChatPartners(agent.currentChatId, agentId);
+
+  return message;
+}
+
 // --- Bridge functions (set by the Phaser engine) ---
 
 export interface BridgeFunctions {
@@ -612,11 +662,33 @@ async function tickAgent(agentId: string): Promise<void> {
       );
     }
 
+    // --- Text-to-tool-call fallback for reasoning models ---
+    //
+    // Some models (notably Qwen3-family thinking models) occasionally
+    // describe the action they want to take in plain text instead of
+    // emitting the corresponding tool call, e.g. the response text is
+    // `"say: Hello there."` with zero tool_calls. If the agent is in a
+    // chat and no `say` tool was called this tick, recover the message
+    // from the text and send it as a chat message. Prevents dropped
+    // utterances without requiring a re-prompt.
+    const recoveredSayFromText = recoverSayFromText({
+      agentId,
+      agentName: runtime.config.name,
+      text: result.text,
+      toolCallsThisTick: result.steps?.flatMap((s) => s.toolCalls ?? []) ?? [],
+    });
+    if (recoveredSayFromText) {
+      console.log(
+        `[AI] ${agentId}: Recovered say from text: "${recoveredSayFromText.slice(0, 80)}${recoveredSayFromText.length > 80 ? "..." : ""}"`,
+      );
+    }
+
     // Schedule next tick — faster if in an active conversation waiting for our reply
     const nextDelay = getTickDelay(agentId);
     setTimeout(() => tickAgent(agentId), nextDelay);
   } catch (error: unknown) {
     const err = error as {
+      name?: string;
       status?: number;
       statusCode?: number;
       message?: string;
@@ -630,6 +702,26 @@ async function tickAgent(agentId: string): Promise<void> {
       err?.message?.includes("400") ||
       err?.responseBody?.includes("tool") ||
       err?.message?.toLowerCase().includes("tool_call");
+
+    // Model emitted a tool call with invalid/missing arguments (e.g.
+    // Qwen3.6 sometimes calls `say({})` with no `message`). This is a
+    // soft error — no corruption, no rate limiting — just a model
+    // hiccup. Skip this tick quickly without the full stack trace.
+    const isInvalidToolArgs =
+      err?.name === "AI_InvalidToolArgumentsError" ||
+      (err?.message?.includes("Invalid arguments for tool") &&
+        err?.message?.includes("Type validation failed"));
+
+    if (isInvalidToolArgs) {
+      // Extract just the tool name from the error message for a clean log.
+      const toolMatch = err?.message?.match(/tool\s+([a-z_]+):/i);
+      const toolName = toolMatch ? toolMatch[1] : "unknown";
+      console.warn(
+        `[AI] ${agentId}: Model emitted malformed ${toolName}() call (missing required args), skipping tick`,
+      );
+      setTimeout(() => tickAgent(agentId), 2000);
+      return;
+    }
 
     // Self-heal: if the message history is corrupted (starts with an
     // orphan `tool` message) OR we got a 400 that smells like a
