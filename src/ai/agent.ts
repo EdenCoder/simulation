@@ -203,7 +203,10 @@ export function setBridgeFunctions(fns: BridgeFunctions) {
   );
 }
 
-// --- OpenRouter model ---
+// --- LLM model (any OpenAI-compatible endpoint) ---
+
+const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_MODEL_ID = "openrouter/free";
 
 const modelCache = new Map<
   string,
@@ -213,23 +216,24 @@ const modelCache = new Map<
 function getModel(role: string) {
   const modelId =
     role === "guard"
-      ? import.meta.env.VITE_GUARD_MODEL || "openrouter/free"
-      : import.meta.env.VITE_PRISONER_MODEL || "openrouter/free";
+      ? import.meta.env.VITE_GUARD_MODEL || DEFAULT_MODEL_ID
+      : import.meta.env.VITE_PRISONER_MODEL || DEFAULT_MODEL_ID;
 
   const cached = modelCache.get(modelId);
   if (cached) return cached;
 
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY || "";
+  const baseURL = import.meta.env.VITE_OPENAI_BASE_URL || DEFAULT_BASE_URL;
   if (!apiKey) {
     console.error(
       "[AI] VITE_OPENROUTER_API_KEY is not set! Agents will not work.",
     );
   }
-  const openrouter = createOpenAI({
-    baseURL: "https://openrouter.ai/api/v1",
+  const provider = createOpenAI({
+    baseURL,
     apiKey,
   });
-  const model = openrouter(modelId);
+  const model = provider(modelId);
   modelCache.set(modelId, model);
   return model;
 }
@@ -538,7 +542,11 @@ async function tickAgent(agentId: string): Promise<void> {
       messages: runtime.messages,
       tools,
       maxSteps: 5,
-      maxTokens: 1000,
+      // Larger than strictly needed for OpenAI/OpenRouter models, but
+      // thinking/reasoning models (e.g. Qwen3.6 which emits an internal
+      // `reasoning` channel before the user-visible content) easily use
+      // 500-1500 tokens on reasoning alone.
+      maxTokens: 4000,
       onStepFinish({ finishReason, toolCalls }) {
         if (toolCalls && toolCalls.length > 0) {
           for (const tc of toolCalls) {
