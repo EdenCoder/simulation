@@ -24,6 +24,7 @@
     "@tailwindcss/postcss": "^4.1.4",
     "@vitejs/plugin-react": "^4.6.0",
     "ai": "^4.3.16",
+    "bottleneck": "^2.19.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "easystarjs": "^0.4.4",

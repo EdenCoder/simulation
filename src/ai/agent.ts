@@ -13,7 +13,7 @@ import type { AgentConfig, RegionConfig } from "@/engine/types";
 import { useAgentsStore } from "@/store/agents";
 import { useChatsStore } from "@/store/chats";
 
-import { RateLimiter } from "./rate-limiter";
+import { scheduleAgentCall } from "./rate-limiter";
 import { getTimeContext, getCurrentGameTime } from "./context/time";
 import { getNearbyContext } from "./context/nearby";
 
@@ -115,7 +115,6 @@ interface AgentRuntime {
 }
 
 const agentRuntimes = new Map<string, AgentRuntime>();
-const rateLimiter = new RateLimiter(800);
 
 /**
  * Track how many consecutive ticks each agent has spent in the same chat.
@@ -577,37 +576,40 @@ async function tickAgent(agentId: string): Promise<void> {
   }
 
   try {
-    await rateLimiter.wait();
+    // Build context/tools just before the call so dynamic state (region,
+    // chat partners, points, etc.) is fresh when we actually hit the API,
+    // not when we were originally queued behind the rate limiter.
+    const result = await scheduleAgentCall(agentId, runtime.config.role, () => {
+      const dynamicContext = buildDynamicContext(agentId, runtime);
+      const tools = buildTools(agentId, runtime);
 
-    const dynamicContext = buildDynamicContext(agentId, runtime);
-    const tools = buildTools(agentId, runtime);
+      console.log(
+        `[AI] ${agentId}: Tick (${Object.keys(tools).length} tools, ${runtime.messages.length} msgs)`,
+      );
 
-    console.log(
-      `[AI] ${agentId}: Tick (${Object.keys(tools).length} tools, ${runtime.messages.length} msgs)`,
-    );
-
-    const result = await generateText({
-      model: getModel(runtime.config.role),
-      system: runtime.systemPrompt + "\n\n" + dynamicContext,
-      messages: runtime.messages,
-      tools,
-      maxSteps: 5,
-      // Larger than strictly needed for OpenAI/OpenRouter models, but
-      // thinking/reasoning models (e.g. Qwen3.6 which emits an internal
-      // `reasoning` channel before the user-visible content) easily use
-      // 500-1500 tokens on reasoning alone.
-      maxTokens: 4000,
-      onStepFinish({ finishReason, toolCalls }) {
-        if (toolCalls && toolCalls.length > 0) {
-          for (const tc of toolCalls) {
-            console.log(
-              `[AI] ${agentId}: tool ${tc.toolName}(${JSON.stringify(tc.args)})`,
-            );
+      return generateText({
+        model: getModel(runtime.config.role),
+        system: runtime.systemPrompt + "\n\n" + dynamicContext,
+        messages: runtime.messages,
+        tools,
+        maxSteps: 5,
+        // Larger than strictly needed for OpenAI/OpenRouter models, but
+        // thinking/reasoning models (e.g. Qwen3.6 which emits an internal
+        // `reasoning` channel before the user-visible content) easily use
+        // 500-1500 tokens on reasoning alone.
+        maxTokens: 4000,
+        onStepFinish({ finishReason, toolCalls }) {
+          if (toolCalls && toolCalls.length > 0) {
+            for (const tc of toolCalls) {
+              console.log(
+                `[AI] ${agentId}: tool ${tc.toolName}(${JSON.stringify(tc.args)})`,
+              );
+            }
+          } else if (finishReason === "stop" || finishReason === "length") {
+            console.log(`[AI] ${agentId}: finished (${finishReason})`);
           }
-        } else if (finishReason === "stop" || finishReason === "length") {
-          console.log(`[AI] ${agentId}: finished (${finishReason})`);
-        }
-      },
+        },
+      });
     });
 
     // Append all response messages to history for continuity
