@@ -51,7 +51,7 @@ export const AgentThought = ({
       style={{ opacity }}
     >
       <div className="relative game-card game-card--thought line-clamp-4">
-        {content}
+        <span className="font-semibold not-italic">Thinking...</span> {content}
         <div className="game-card__tail">
           <div className="game-card__tail-arrow" />
         </div>

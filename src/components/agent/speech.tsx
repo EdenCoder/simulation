@@ -51,7 +51,7 @@ export const AgentSpeech = ({
       style={{ opacity }}
     >
       <div className="relative game-card game-card--speech">
-        {content}
+        <span className="font-semibold">Speaking...</span> {content}
         <div className="game-card__tail">
           <div className="game-card__tail-arrow" />
         </div>

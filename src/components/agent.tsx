@@ -4,7 +4,6 @@ import clsx from 'clsx';
 import { useAgentsStore, type AgentState } from '@/store/agents';
 import { AgentThought } from './agent/thought';
 import { AgentSpeech } from './agent/speech';
-import { AgentChat } from './agent/chat';
 
 interface AgentProps {
   agentId: string;
@@ -33,7 +32,6 @@ export const Agent: React.FC<AgentProps> = ({ agentId }) => {
 
   const hasSpeech = !!agentData.speechBubble;
   const hasThought = !!agentData.thoughtBubble;
-  const hasChat = agentData.chatMessages.length > 0 && !!agentData.currentChatId;
   const hasMove = !!agentData.moveBubble;
 
   return (
@@ -41,19 +39,13 @@ export const Agent: React.FC<AgentProps> = ({ agentId }) => {
       className="absolute pointer-events-none w-6 h-6 flex flex-col items-center"
       style={{ left: `${agentData.x}px`, top: `${agentData.y}px`, transform: 'translate(-50%, -50%)' }}
     >
-      {hasChat && (
-        <div className="absolute bottom-full mb-1 z-30">
-          <AgentChat messages={agentData.chatMessages} currentAgentId={agentId} />
-        </div>
-      )}
-
-      {hasSpeech && !hasChat && (
+      {hasSpeech && (
         <div className="absolute bottom-full mb-1 z-25">
           <AgentSpeech content={agentData.speechBubble!.content} timestamp={agentData.speechBubble!.timestamp} duration={agentData.speechBubble!.duration} />
         </div>
       )}
 
-      {hasThought && !hasChat && (
+      {hasThought && !hasSpeech && (
         <div className="absolute bottom-full mb-1 z-15">
           <AgentThought content={agentData.thoughtBubble!.content} timestamp={agentData.thoughtBubble!.timestamp} duration={agentData.thoughtBubble!.duration} />
         </div>
