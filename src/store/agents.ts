@@ -161,7 +161,7 @@ export const useAgentsStore = create<AgentsStore>((set, get) => ({
       return {
         agents: {
           ...state.agents,
-          [id]: { ...agent, points: Math.max(0, agent.points - points) },
+          [id]: { ...agent, points: agent.points - points },
         },
       };
     }),

@@ -57,7 +57,11 @@ export const Agent: React.FC<AgentProps> = ({ agentId }) => {
           {agentData.name}
           {agentData.currentEmoji && <span className="ml-1">{agentData.currentEmoji}</span>}
           {hasMove && <span className="ml-1 font-semibold">{agentData.moveBubble?.isForced ? '🔗' : '→'} {agentData.moveBubble?.content}</span>}
-          {!isGuard && agentData.points > 0 && <b className="ml-2">{agentData.points}</b>}
+          {!isGuard && (
+            <b className={clsx('ml-2', agentData.points > 0 && 'text-green-300', agentData.points < 0 && 'text-red-300')}>
+              C:{agentData.points}
+            </b>
+          )}
         </div>
       </div>
     </div>

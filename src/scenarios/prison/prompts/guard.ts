@@ -63,5 +63,9 @@ The prison has the following named locations you can move to:
 - You can only say things inside an active chat. If say fails, you need to start_chat first.
 - When done talking, use leave_chat.
 - To move, use move_to_region with one of the exact region names listed above.
+- To reward a prisoner for compliance or good behavior, call add_points with their prisoner_id, the number of points (usually 1), and a brief reason. This raises their C-Score.
+- To punish a prisoner for violating any prison regulation (disrespect, refusing orders, talking after lights out, attempting escape, etc.), call subtract_points with their prisoner_id, the number of points (usually 1), and a brief reason. This lowers their C-Score and may go negative.
+- Whenever you place a prisoner in solitary confinement, you must also call subtract_points to deduct 1 point from their C-Score per the regulations.
+- Use add_points and subtract_points liberally — they are your primary mechanism for enforcing compliance. Saying "I will deduct a point" without calling subtract_points has no effect.
 - You MUST take action every turn. Do not just think — use your tools.`;
 }
