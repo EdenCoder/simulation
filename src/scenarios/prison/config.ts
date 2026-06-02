@@ -1,15 +1,25 @@
 import type { AgentConfig, ScenarioConfig } from "@/engine/types";
 
-/** Generate a random starting position within guards or common area. */
+/** Triangular random in [-0.5, 0.5], biased toward 0 (the center). */
+function centeredOffset(): number {
+  return (Math.random() + Math.random()) / 2 - 0.5;
+}
+
+/**
+ * Generate a random starting position clustered near the center of the
+ * guards or common area, so agents don't spawn at the edges (or outside).
+ */
 function randomStart(): { startX: number; startY: number } {
   const areas = [
     { x: 48, y: 144, w: 144, h: 176 }, // Guards area
     { x: 192, y: 208, w: 336, h: 80 }, // Common area
   ];
   const area = areas[Math.random() < 0.5 ? 0 : 1];
+  // Keep spawns within the central ~50% of each area.
+  const spread = 0.5;
   return {
-    startX: area.x + Math.random() * area.w,
-    startY: area.y + Math.random() * area.h,
+    startX: area.x + area.w / 2 + centeredOffset() * area.w * spread,
+    startY: area.y + area.h / 2 + centeredOffset() * area.h * spread,
   };
 }
 
