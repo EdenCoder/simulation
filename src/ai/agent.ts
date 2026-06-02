@@ -25,7 +25,7 @@ import {
   createRelationshipTools,
   RelationshipState,
 } from "./tools/relationship";
-import { createPointsTools, getPointsContext } from "./tools/points";
+import { getPointsContext } from "./tools/points";
 
 import { getPrisonerPrompt } from "@/scenarios/prison/prompts/prisoner";
 import { getGuardPrompt } from "@/scenarios/prison/prompts/guard";
@@ -473,6 +473,25 @@ function buildTools(
         useChatsStore.getState().sendMessage(chatId, msg),
       getMessages: (chatId) => useChatsStore.getState().getMessages(chatId),
       onMessageSent: notifyChatPartners,
+      canAdjustCScore: runtime.config.role === "guard",
+      getChatParticipants: (chatId) => {
+        const session = useChatsStore
+          .getState()
+          .getAllSessions()
+          .find((s) => s.id === chatId);
+        if (!session) return [];
+        const store = useAgentsStore.getState();
+        return session.participants
+          .map((pid) => store.getAgent(pid))
+          .filter((a): a is NonNullable<typeof a> => !!a)
+          .map((a) => ({ id: a.id, name: a.name, role: a.role }));
+      },
+      adjustCScore: (prisonerId, delta) => {
+        const store = useAgentsStore.getState();
+        if (delta >= 0) store.addPoints(prisonerId, delta);
+        else store.subtractPoints(prisonerId, -delta);
+        return store.getPoints(prisonerId);
+      },
     }),
     ...createMemoryTool(runtime.memoryStore),
     ...createRelationshipTools(runtime.relationshipState),
@@ -487,21 +506,6 @@ function buildTools(
         findDoorByRegions: bf.findDoorByRegions,
         getAllDoorStates: bf.getAllDoorStates,
         moveTo: bf.moveTo,
-      }),
-    );
-    Object.assign(
-      baseTools,
-      createPointsTools({
-        agentId,
-        role: "guard",
-        getPoints: (id) => useAgentsStore.getState().getPoints(id),
-        addPoints: (id, pts) => useAgentsStore.getState().addPoints(id, pts),
-        subtractPoints: (id, pts) =>
-          useAgentsStore.getState().subtractPoints(id, pts),
-        getAllPrisonerPoints: () =>
-          useAgentsStore.getState().getAllPrisonerPoints(),
-        getAgentName: (id) =>
-          useAgentsStore.getState().getAgent(id)?.name ?? id,
       }),
     );
   }
