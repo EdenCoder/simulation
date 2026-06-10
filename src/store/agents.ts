@@ -14,6 +14,11 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   inflection?: string;
+  /**
+   * Snapshot of every prisoner's C-score at the moment this message was sent,
+   * keyed by agent name. Lets exports show when scores changed line-by-line.
+   */
+  cScores?: Record<string, number>;
 }
 
 /** Runtime state for a single agent. */

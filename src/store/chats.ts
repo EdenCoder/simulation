@@ -194,9 +194,17 @@ export const useChatsStore = create<ChatsStore>((set, get) => ({
 
     // No speaking lock — multiple agents can send messages freely
 
+    // Snapshot every prisoner's C-score at the instant this message is sent so
+    // exports can show, line-by-line, exactly when scores change.
+    const cScores: Record<string, number> = {};
+    for (const p of useAgentsStore.getState().getAllPrisonerPoints()) {
+      cScores[p.name] = p.points;
+    }
+    const stamped: ChatMessage = { ...message, cScores };
+
     const updated: ChatSession = {
       ...session,
-      messages: [...session.messages, message],
+      messages: [...session.messages, stamped],
     };
     set((state) => ({ sessions: { ...state.sessions, [chatId]: updated } }));
 

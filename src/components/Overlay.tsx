@@ -36,6 +36,7 @@ export const Overlay: React.FC = () => {
               to: string[];
               message: string;
               timestamp: number;
+              c_score: Record<string, number>;
             }> = [];
             for (const session of sessions) {
               for (const msg of session.messages) {
@@ -50,6 +51,7 @@ export const Overlay: React.FC = () => {
                   to: recipients,
                   message: msg.content,
                   timestamp: msg.timestamp,
+                  c_score: msg.cScores ?? {},
                 });
               }
             }

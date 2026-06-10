@@ -858,6 +858,7 @@ export function exportMessagesAsJSONL(): string {
         chatParticipants: session.participants.map(
           (pid) => agentsStore.getAgent(pid)?.name ?? pid,
         ),
+        c_score: msg.cScores ?? {},
       });
     }
   }
