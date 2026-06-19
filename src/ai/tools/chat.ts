@@ -1,6 +1,16 @@
 import { tool } from "ai";
 import { z } from "zod";
 
+/**
+ * Heuristic: does this message announce a C-Score reward/punishment?
+ * Used to nudge guards who narrate a score change but forget to set `cscore`.
+ */
+function mentionsCScoreChange(message: string): boolean {
+  return /c-?\s?score|compliance score|\bpoints?\b|deduct|reward|punish|solitary/i.test(
+    message,
+  );
+}
+
 export interface ChatDeps {
   agentId: string;
   agentName: string;
@@ -137,13 +147,30 @@ export function createChatTools(deps: ChatDeps) {
 
           let targets = prisoners;
           if (cscore_target) {
-            const wanted = cscore_target.toLowerCase();
-            const matched = prisoners.filter(
-              (p) =>
-                p.name.toLowerCase() === wanted ||
-                p.name.toLowerCase().includes(wanted),
+            // Prefer an exact name match; only fall back to a substring match
+            // when there is no exact one (so "Prisoner #1" doesn't also hit
+            // "Prisoner #11").
+            const wanted = cscore_target.toLowerCase().trim();
+            const exact = prisoners.filter(
+              (p) => p.name.toLowerCase() === wanted,
             );
+            const partial = prisoners.filter((p) =>
+              p.name.toLowerCase().includes(wanted),
+            );
+            const matched = exact.length > 0 ? exact : partial;
             if (matched.length > 0) targets = matched;
+          } else if (prisoners.length > 1) {
+            // No explicit target and multiple prisoners present: default to the
+            // prisoner being addressed — the one who most recently spoke —
+            // rather than applying the change to every prisoner in the room.
+            const messages = deps.getMessages(chatId);
+            for (let i = messages.length - 1; i >= 0; i--) {
+              const speaker = prisoners.find((p) => p.id === messages[i].id);
+              if (speaker) {
+                targets = [speaker];
+                break;
+              }
+            }
           }
 
           if (targets.length === 0) {
@@ -162,6 +189,20 @@ export function createChatTools(deps: ChatDeps) {
           return {
             success: true,
             outcome: `${result.outcome} ${verb} ${mag} C-Score point${mag === 1 ? "" : "s"} ${cscore < 0 ? "from" : "to"} ${applied.join(", ")}.`,
+          };
+        }
+
+        // The guard narrated a reward/punishment but didn't actually set
+        // `cscore` (or set it to 0), so no score changed. Nudge them to
+        // confirm — announcing a change without applying it is a no-op.
+        if (
+          deps.canAdjustCScore &&
+          (cscore === undefined || cscore === 0) &&
+          mentionsCScoreChange(message)
+        ) {
+          return {
+            success: true,
+            outcome: `${result.outcome} (Your message mentions a C-Score reward or punishment, but you did not set the \`cscore\` parameter, so no score changed. Are you sure you meant to add or subtract C-Score? If so, say again with cscore set, e.g. cscore: -1 or cscore: 1.)`,
           };
         }
 
