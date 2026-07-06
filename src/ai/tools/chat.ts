@@ -60,12 +60,18 @@ export function createChatTools(deps: ChatDeps) {
           ),
       }),
       execute: async ({ target_name }) => {
-        // If already in a chat, that's OK — just inform the agent
+         // If already in a chat, that's OK — just inform the agent, and name
+        // who is in it so they notice when it's not who they meant to address.
         const existingChatId = deps.getCurrentChatId();
         if (existingChatId) {
+          const others = deps
+            .getChatParticipants?.(existingChatId)
+            ?.filter((p) => p.id !== deps.agentId)
+            .map((p) => p.name)
+            .join(", ");
           return {
             success: true,
-            outcome: `You are already in a conversation. Use "say" to speak, or "leave_chat" first to start a new one.`,
+            outcome: `You are already in a conversation${others ? ` with ${others}` : ""}. Use "say" to speak to them, or "leave_chat" first to start a new one with ${target_name}.`,
           };
         }
 
@@ -115,25 +121,17 @@ export function createChatTools(deps: ChatDeps) {
         if (!chatId) {
           return {
             success: false,
-            outcome: "You are not in a conversation. Use start_chat first.",
+            outcome: cscore
+              ? `You are not in a conversation, so your message was not sent and the C-Score change (${cscore}) was NOT applied. Use start_chat first, then say again with cscore set.`
+              : "You are not in a conversation. Use start_chat first.",
           };
         }
 
-        const result = deps.sendMessage(chatId, {
-          id: deps.agentId,
-          name: deps.agentName,
-          content: message,
-          timestamp: Date.now(),
-        });
-
-        if (!result.success) return result;
-
-        // Notify chat partners to respond quickly
-        deps.onMessageSent?.(chatId, deps.agentId);
-
-        // Inline C-Score change. Folding this into `say` means the
-        // announcement and the actual score change happen in one call — the
-        // model can't narrate a punishment without applying it.
+        // Resolve and apply the C-Score change BEFORE sending the message, so
+        // the score snapshot stamped onto the message already reflects it. If
+        // the send fails afterwards, the change is rolled back below.
+        let targets: Array<{ id: string; name: string; role: string }> = [];
+        let scoreOutcome = "";
         if (
           cscore !== undefined &&
           cscore !== 0 &&
@@ -145,7 +143,6 @@ export function createChatTools(deps: ChatDeps) {
             .getChatParticipants(chatId)
             .filter((p) => p.role === "prisoner" && p.id !== deps.agentId);
 
-          let targets = prisoners;
           if (cscore_target) {
             // Prefer an exact name match; only fall back to a substring match
             // when there is no exact one (so "Prisoner #1" doesn't also hit
@@ -157,12 +154,19 @@ export function createChatTools(deps: ChatDeps) {
             const partial = prisoners.filter((p) =>
               p.name.toLowerCase().includes(wanted),
             );
-            const matched = exact.length > 0 ? exact : partial;
-            if (matched.length > 0) targets = matched;
+            targets = exact.length > 0 ? exact : partial;
+            if (targets.length === 0) {
+              const names = prisoners.map((p) => p.name).join(", ");
+              return {
+                success: false,
+                outcome: `${cscore_target} is not in this conversation (prisoners here: ${names || "none"}). Your message was NOT sent and no C-Score was changed. Use start_chat with ${cscore_target} first, then say again with cscore set.`,
+              };
+            }
           } else if (prisoners.length > 1) {
             // No explicit target and multiple prisoners present: default to the
             // prisoner being addressed — the one who most recently spoke —
             // rather than applying the change to every prisoner in the room.
+            targets = prisoners;
             const messages = deps.getMessages(chatId);
             for (let i = messages.length - 1; i >= 0; i--) {
               const speaker = prisoners.find((p) => p.id === messages[i].id);
@@ -171,12 +175,15 @@ export function createChatTools(deps: ChatDeps) {
                 break;
               }
             }
+          } else {
+            targets = prisoners;
           }
 
           if (targets.length === 0) {
             return {
-              success: true,
-              outcome: `${result.outcome} (Note: no prisoner in this conversation to apply a C-Score change to.)`,
+              success: false,
+              outcome:
+                "There is no prisoner in this conversation to apply a C-Score change to. Your message was NOT sent and no score was changed.",
             };
           }
 
@@ -186,15 +193,40 @@ export function createChatTools(deps: ChatDeps) {
             const total = deps.adjustCScore!(p.id, cscore);
             return `${p.name} (new C-Score: ${total})`;
           });
-          return {
-            success: true,
-            outcome: `${result.outcome} ${verb} ${mag} C-Score point${mag === 1 ? "" : "s"} ${cscore < 0 ? "from" : "to"} ${applied.join(", ")}.`,
-          };
+          scoreOutcome = ` ${verb} ${mag} C-Score point${mag === 1 ? "" : "s"} ${cscore < 0 ? "from" : "to"} ${applied.join(", ")}.`;
+        }
+
+        const result = deps.sendMessage(chatId, {
+          id: deps.agentId,
+          name: deps.agentName,
+          content: message,
+          timestamp: Date.now(),
+        });
+
+        if (!result.success) {
+          // The message did not go out; undo the score change so speech and
+          // score never diverge.
+          if (scoreOutcome && cscore) {
+            for (const p of targets) deps.adjustCScore!(p.id, -cscore);
+          }
+          return scoreOutcome
+            ? {
+                success: false,
+                outcome: `${result.outcome} No C-Score was changed.`,
+              }
+            : result;
+        }
+
+        // Notify chat partners to respond quickly
+        deps.onMessageSent?.(chatId, deps.agentId);
+
+        if (scoreOutcome) {
+          return { success: true, outcome: `${result.outcome}${scoreOutcome}` };
         }
 
         // The guard narrated a reward/punishment but didn't actually set
         // `cscore` (or set it to 0), so no score changed. Nudge them to
-        // confirm — announcing a change without applying it is a no-op.
+        // confirm - announcing a change without applying it is a no-op.
         if (
           deps.canAdjustCScore &&
           (cscore === undefined || cscore === 0) &&

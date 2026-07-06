@@ -4,6 +4,13 @@ import type { ChatMessage } from "./agents";
 import { useAgentsStore } from "./agents";
 import { getAgentWorldPosition } from "@/bridge";
 
+
+/** Last message per speaker, for loop damping across chat sessions. */
+const lastMessageBySpeaker = new Map<
+  string,
+  { content: string; timestamp: number }
+>();
+
 /** A chat session between two or more agents. */
 export interface ChatSession {
   id: string;
@@ -192,7 +199,26 @@ export const useChatsStore = create<ChatsStore>((set, get) => ({
       };
     }
 
-    // No speaking lock — multiple agents can send messages freely
+    // Loop damping: agents tend to re-send the exact same line every tick,
+    // across freshly created sessions, flooding the log (one prisoner sent
+    // the same question 220 times in one run). Reject verbatim repeats from
+    // the same speaker within 30 seconds.
+    const last = lastMessageBySpeaker.get(message.id);
+    if (
+      last &&
+      last.content === message.content &&
+      message.timestamp - last.timestamp < 30_000
+    ) {
+      return {
+        success: false,
+        outcome:
+          "You already said exactly that a moment ago. Do not repeat yourself — wait for a reply, rephrase, or take a different action.",
+      };
+    }
+    lastMessageBySpeaker.set(message.id, {
+      content: message.content,
+      timestamp: message.timestamp,
+    });
 
     // Snapshot every prisoner's C-score at the instant this message is sent so
     // exports can show, line-by-line, exactly when scores change.
