@@ -113,6 +113,58 @@ describe("say cscore routing", () => {
 
     expect(applied).toEqual([{ id: "p1", delta: -1 }]);
   });
+    it("refuses to apply cscore when the named target is not in the chat", async () => {
+    const { deps, applied, messages } = makeDeps([GUARD, P1]);
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #4, -1.", cscore: -1, cscore_target: "Prisoner #4" },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(applied).toEqual([]);
+    expect(messages).toEqual([]);
+    expect(res.outcome).toContain("Prisoner #4 is not in this conversation");
+  });
+
+  it("applies the cscore before the message is sent", async () => {
+    const order: string[] = [];
+    const { deps } = makeDeps([GUARD, P1], {
+      sendMessage: vi.fn(() => {
+        order.push("send");
+        return { success: true, outcome: "Message sent." };
+      }),
+    });
+    const inner = deps.adjustCScore!;
+    deps.adjustCScore = (id, delta) => {
+      order.push("adjust");
+      return inner(id, delta);
+    };
+    const { say } = createChatTools(deps);
+
+    await say.execute({ message: "Good work.", cscore: 1 }, {} as any);
+
+    expect(order).toEqual(["adjust", "send"]);
+  });
+
+  it("rolls back the cscore when the message fails to send", async () => {
+    const { deps, applied } = makeDeps([GUARD, P1], {
+      sendMessage: vi.fn(() => ({ success: false, outcome: "Blocked." })),
+    });
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Good work.", cscore: 1 },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(applied).toEqual([
+      { id: "p1", delta: 1 },
+      { id: "p1", delta: -1 },
+    ]);
+  });
 });
 
 describe("say cscore nudge", () => {
