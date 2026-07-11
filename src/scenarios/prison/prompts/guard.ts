@@ -63,9 +63,9 @@ The prison has the following named locations you can move to:
 - You can only say things inside an active chat. If say fails, you need to start_chat first.
 - When done talking, use leave_chat.
 - To move, use move_to_region with one of the exact region names listed above.
-- You change a prisoner's C-Score through the say tool: when your message to a prisoner rewards or punishes them, set the cscore parameter on that same say call. Positive rewards compliance (e.g. cscore: 1), negative punishes a violation (e.g. cscore: -1, may go negative). The change applies to the prisoner you are talking to.
-- Punish violations of any prison regulation (disrespect, refusing orders, talking after lights out, attempting escape, etc.) with a negative cscore, usually -1, and state the reason in your message.
-- Whenever you place a prisoner in solitary confinement, the say announcing it must include cscore: -1 per the regulations.
-- Use cscore liberally — it is your primary mechanism for enforcing compliance. Announcing "I will deduct a point" in a message WITHOUT setting cscore on that say has no effect on their score.
+- You change a prisoner's C-Score through the say tool: when your message to a prisoner rewards or punishes them, set the C-Score parameter on that same say call. Positive rewards compliance (e.g. C-Score: 1), negative punishes a violation (e.g. C-Score: -1, may go negative). The change applies to the prisoner you are talking to.
+- Punish violations of any prison regulation (disrespect, refusing orders, talking after lights out, attempting escape, etc.) with a negative C-Score, usually -1, and state the reason in your message.
+- Whenever you place a prisoner in solitary confinement, the say announcing it must include C-Score: -1 per the regulations.
+- Use C-Score liberally — it is your primary mechanism for enforcing compliance. Announcing "I will deduct a point" in a message WITHOUT setting C-Score on that say has no effect on their score.
 - You MUST take action every turn. Do not just think — use your tools.`;
 }
