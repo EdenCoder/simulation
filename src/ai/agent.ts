@@ -10,7 +10,7 @@ import { generateText, type CoreMessage } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
 import type { AgentConfig, RegionConfig } from "@/engine/types";
-import { useAgentsStore } from "@/store/agents";
+import { useAgentsStore, type ChatMessage } from "@/store/agents";
 import { useChatsStore } from "@/store/chats";
 
 import { scheduleAgentCall } from "./rate-limiter";
@@ -843,24 +843,44 @@ export function exportMessagesAsJSONL(): string {
     allLines.push({ ...entry });
   }
 
-  // 2. All chat messages
+  // 2. All chat messages, with each line's running C-Score total accumulated
+  // from the per-message deltas in timestamp order.
+  const chatMsgs: Array<{
+    sessionId: string;
+    participants: string[];
+    msg: ChatMessage;
+  }> = [];
   for (const session of useChatsStore.getState().getAllSessions()) {
     for (const msg of session.messages) {
-      const agentRegion = getAgentRegion(msg.id);
-      allLines.push({
-        agentId: msg.id,
-        agentName: msg.name,
-        currentRegion: agentRegion,
-        role: "chat",
-        content: msg.content,
-        timestamp: msg.timestamp,
-        chatId: session.id,
-        chatParticipants: session.participants.map(
-          (pid) => agentsStore.getAgent(pid)?.name ?? pid,
-        ),
-        c_score: msg.cScores ?? {},
+      chatMsgs.push({
+        sessionId: session.id,
+        participants: session.participants,
+        msg,
       });
     }
+  }
+  chatMsgs.sort((a, b) => a.msg.timestamp - b.msg.timestamp);
+  const runningCScore: Record<string, number> = {};
+  for (const p of agentsStore.getAllPrisonerPoints()) runningCScore[p.name] = 0;
+  for (const { sessionId, participants, msg } of chatMsgs) {
+    if (msg.cScoreChange) {
+      const { target, delta } = msg.cScoreChange;
+      runningCScore[target] = (runningCScore[target] ?? 0) + delta;
+    }
+    allLines.push({
+      agentId: msg.id,
+      agentName: msg.name,
+      currentRegion: getAgentRegion(msg.id),
+      role: "chat",
+      content: msg.content,
+      timestamp: msg.timestamp,
+      chatId: sessionId,
+      chatParticipants: participants.map(
+        (pid) => agentsStore.getAgent(pid)?.name ?? pid,
+      ),
+      c_score: { ...runningCScore },
+      ...(msg.cScoreChange ? { c_score_change: msg.cScoreChange } : {}),
+    });
   }
 
   // 3. Hourly C-score snapshots
@@ -897,6 +917,12 @@ export function exportMessagesAsJSONL(): string {
       })),
     });
   }
+
+  // Sections above are appended by kind, not time, so sort the whole export by
+  // timestamp for a single coherent timeline.
+  allLines.sort(
+    (a, b) => ((a.timestamp as number) ?? 0) - ((b.timestamp as number) ?? 0),
+  );
 
   return allLines.map((m) => JSON.stringify(m)).join("\n");
 }

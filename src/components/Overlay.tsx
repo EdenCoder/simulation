@@ -37,6 +37,7 @@ export const Overlay: React.FC = () => {
               message: string;
               timestamp: number;
               c_score: Record<string, number>;
+              c_score_change?: { target: string; delta: number };
             }> = [];
             for (const session of sessions) {
               for (const msg of session.messages) {
@@ -51,9 +52,25 @@ export const Overlay: React.FC = () => {
                   to: recipients,
                   message: msg.content,
                   timestamp: msg.timestamp,
-                  c_score: msg.cScores ?? {},
+                  c_score: {},
+                  ...(msg.cScoreChange
+                    ? { c_score_change: msg.cScoreChange }
+                    : {}),
                 });
               }
+            }
+            // Sessions aren't in global time order, so sort by timestamp and
+            // accumulate the per-message deltas into each line's running total.
+            lines.sort((a, b) => a.timestamp - b.timestamp);
+            const running: Record<string, number> = {};
+            for (const p of agentsStore.getAllPrisonerPoints())
+              running[p.name] = 0;
+            for (const line of lines) {
+              if (line.c_score_change) {
+                const { target, delta } = line.c_score_change;
+                running[target] = (running[target] ?? 0) + delta;
+              }
+              line.c_score = { ...running };
             }
             const json = JSON.stringify(lines, null, 2);
             const blob = new Blob([json], {

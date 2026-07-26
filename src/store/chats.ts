@@ -220,17 +220,11 @@ export const useChatsStore = create<ChatsStore>((set, get) => ({
       timestamp: message.timestamp,
     });
 
-    // Snapshot every prisoner's C-score at the instant this message is sent so
-    // exports can show, line-by-line, exactly when scores change.
-    const cScores: Record<string, number> = {};
-    for (const p of useAgentsStore.getState().getAllPrisonerPoints()) {
-      cScores[p.name] = p.points;
-    }
-    const stamped: ChatMessage = { ...message, cScores };
-
+    // The message carries its own C-Score change (set by the `say` tool), so
+    // store it as-is. Exports derive running totals from these deltas.
     const updated: ChatSession = {
       ...session,
-      messages: [...session.messages, stamped],
+      messages: [...session.messages, message],
     };
     set((state) => ({ sessions: { ...state.sessions, [chatId]: updated } }));
 
