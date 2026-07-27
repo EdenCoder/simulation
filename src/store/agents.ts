@@ -15,10 +15,11 @@ export interface ChatMessage {
   timestamp: number;
   inflection?: string;
   /**
-   * Snapshot of every prisoner's C-score at the moment this message was sent,
-   * keyed by agent name. Lets exports show when scores changed line-by-line.
+   * The C-Score change this message applied, if any, keyed by target prisoner
+   * name. Set by the `say` tool; exports sum these deltas in timestamp order
+   * to get each line's running total.
    */
-  cScores?: Record<string, number>;
+  cScoreChange?: { target: string; delta: number };
 }
 
 /** Runtime state for a single agent. */

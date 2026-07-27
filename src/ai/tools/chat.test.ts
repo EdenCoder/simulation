@@ -3,7 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { createChatTools, type ChatDeps } from "@/ai/tools/chat";
 
 type Participant = { id: string; name: string; role: string };
-type Message = { id: string; name: string; content: string; timestamp: number };
+type Message = {
+  id: string;
+  name: string;
+  content: string;
+  timestamp: number;
+  cScoreChange?: { target: string; delta: number };
+};
 
 /**
  * Build a minimal in-memory ChatDeps for a guard ("g1") sitting in a chat
@@ -85,6 +91,29 @@ describe("say cscore routing", () => {
     expect(applied).toEqual([{ id: "p2", delta: -1 }]);
   });
 
+  it("targets the prisoner named in the message over the last speaker", async () => {
+    const { deps, applied } = makeDeps([GUARD, P1, P2]);
+    const { say } = createChatTools(deps);
+
+    // P2 spoke last, but the guard's message addresses Prisoner #1.
+    deps.sendMessage("chat1", {
+      id: "p2",
+      name: "Prisoner #2",
+      content: "what about the schedule, officer?",
+      timestamp: 1,
+    });
+
+    await say.execute(
+      {
+        message: "Prisoner #1, good work. +1.",
+        cscore: 1,
+      },
+      {} as any,
+    );
+
+    expect(applied).toEqual([{ id: "p1", delta: 1 }]);
+  });
+
   it("honors an explicit cscore_target in a multi-prisoner chat", async () => {
     const { deps, applied } = makeDeps([GUARD, P1, P2]);
     const { say } = createChatTools(deps);
@@ -146,6 +175,68 @@ describe("say cscore routing", () => {
     await say.execute({ message: "Good work.", cscore: 1 }, {} as any);
 
     expect(order).toEqual(["adjust", "send"]);
+  });
+
+  it("records the applied change on the message that caused it", async () => {
+    const { deps, messages } = makeDeps([GUARD, P1]);
+    const { say } = createChatTools(deps);
+
+    await say.execute(
+      { message: "Watch it. -1.", cscore: -1 },
+      {} as any,
+    );
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].cScoreChange).toEqual({
+      target: "Prisoner #1",
+      delta: -1,
+    });
+  });
+
+  it("leaves an ordinary message with no change to record", async () => {
+    const { deps, messages } = makeDeps([GUARD, P1]);
+    const { say } = createChatTools(deps);
+
+    await say.execute({ message: "Move to your cell now." }, {} as any);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].cScoreChange).toBeUndefined();
+  });
+
+  it("refuses to apply when prisoners are present but none has spoken", async () => {
+    const { deps, applied, messages } = makeDeps([GUARD, P1, P2]);
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "One of you loses a point.", cscore: -1 },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(applied).toEqual([]);
+    expect(messages).toEqual([]);
+    expect(res.outcome).toContain("ambiguous who the C-Score change applies to");
+  });
+
+  it("refuses a vague target that matches multiple prisoners", async () => {
+    const P12: Participant = {
+      id: "p12",
+      name: "Prisoner #12",
+      role: "prisoner",
+    };
+    const { deps, applied, messages } = makeDeps([GUARD, P1, P12]);
+    const { say } = createChatTools(deps);
+
+    // "Prisoner #" has no exact match but is a substring of both names.
+    const res = await say.execute(
+      { message: "Point off.", cscore: -1, cscore_target: "Prisoner #" },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(applied).toEqual([]);
+    expect(messages).toEqual([]);
+    expect(res.outcome).toContain("matches multiple prisoners");
   });
 
   it("rolls back the cscore when the message fails to send", async () => {

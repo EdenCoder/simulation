@@ -11,6 +11,21 @@ function mentionsCScoreChange(message: string): boolean {
   );
 }
 
+/**
+ * Match the first "Prisoner #N" mentioned in a message to a chat participant,
+ * or undefined if none matches. Used to route a C-Score change to the prisoner
+ * the guard named.
+ */
+function firstNamedPrisoner<T extends { name: string }>(
+  message: string,
+  prisoners: T[],
+): T | undefined {
+  const mention = message.match(/prisoner\s*#?\s*(\d+)/i);
+  if (!mention) return undefined;
+  const num = mention[1];
+  return prisoners.find((p) => p.name.match(/\d+/)?.[0] === num);
+}
+
 export interface ChatDeps {
   agentId: string;
   agentName: string;
@@ -30,7 +45,13 @@ export interface ChatDeps {
   leaveChat: (chatId: string) => { success: boolean; outcome: string };
   sendMessage: (
     chatId: string,
-    message: { id: string; name: string; content: string; timestamp: number },
+    message: {
+      id: string;
+      name: string;
+      content: string;
+      timestamp: number;
+      cScoreChange?: { target: string; delta: number };
+    },
   ) => { success: boolean; outcome: string };
   getMessages: (
     chatId: string,
@@ -113,7 +134,7 @@ export function createChatTools(deps: ChatDeps) {
           .string()
           .optional()
           .describe(
-            "Exact name of the prisoner the cscore applies to. Only needed when more than one prisoner is in the conversation; otherwise it defaults to the prisoner you are talking to.",
+            'Exact name of the prisoner the cscore applies to (e.g. "Prisoner #5"). Always set this to the prisoner you name in your message. Required when more than one prisoner is present; if omitted there, the change is routed to the prisoner named in your message, or refused if that is unclear.',
           ),
       }),
       execute: async ({ message, cscore, cscore_target }) => {
@@ -127,11 +148,12 @@ export function createChatTools(deps: ChatDeps) {
           };
         }
 
-        // Resolve and apply the C-Score change BEFORE sending the message, so
-        // the score snapshot stamped onto the message already reflects it. If
-        // the send fails afterwards, the change is rolled back below.
+        // Resolve and apply the C-Score change before sending, and record it on
+        // the outgoing message. If the send fails, it is rolled back below so
+        // speech and score never diverge.
         let targets: Array<{ id: string; name: string; role: string }> = [];
         let scoreOutcome = "";
+        let cScoreChange: { target: string; delta: number } | undefined;
         if (
           cscore !== undefined &&
           cscore !== 0 &&
@@ -162,18 +184,38 @@ export function createChatTools(deps: ChatDeps) {
                 outcome: `${cscore_target} is not in this conversation (prisoners here: ${names || "none"}). Your message was NOT sent and no C-Score was changed. Use start_chat with ${cscore_target} first, then say again with cscore set.`,
               };
             }
+            if (targets.length > 1) {
+              // A vague partial target could match several prisoners; make the
+              // guard name one exactly rather than scoring all of them.
+              const names = targets.map((p) => p.name).join(", ");
+              return {
+                success: false,
+                outcome: `"${cscore_target}" matches multiple prisoners here (${names}). Your message was NOT sent and no C-Score was changed. Say again with cscore_target set to one exact name.`,
+              };
+            }
           } else if (prisoners.length > 1) {
-            // No explicit target and multiple prisoners present: default to the
-            // prisoner being addressed — the one who most recently spoke —
-            // rather than applying the change to every prisoner in the room.
-            targets = prisoners;
-            const messages = deps.getMessages(chatId);
-            for (let i = messages.length - 1; i >= 0; i--) {
-              const speaker = prisoners.find((p) => p.id === messages[i].id);
-              if (speaker) {
-                targets = [speaker];
-                break;
+            // No explicit target: prefer the prisoner named in the message,
+            // since the most-recent speaker is often a different prisoner.
+            const named = firstNamedPrisoner(message, prisoners);
+            if (named) {
+              targets = [named];
+            } else {
+              // No one named: fall back to the prisoner who spoke most recently.
+              let speaker: (typeof prisoners)[number] | undefined;
+              const messages = deps.getMessages(chatId);
+              for (let i = messages.length - 1; i >= 0; i--) {
+                speaker = prisoners.find((p) => p.id === messages[i].id);
+                if (speaker) break;
               }
+              if (!speaker) {
+                // No name and no prior speaker: too ambiguous to pick a target.
+                const names = prisoners.map((p) => p.name).join(", ");
+                return {
+                  success: false,
+                  outcome: `Multiple prisoners are here (${names}) and none is named in your message or has spoken yet, so it is ambiguous who the C-Score change applies to. Your message was NOT sent and no score changed. Say again with cscore_target set to the exact prisoner name.`,
+                };
+              }
+              targets = [speaker];
             }
           } else {
             targets = prisoners;
@@ -194,6 +236,7 @@ export function createChatTools(deps: ChatDeps) {
             return `${p.name} (new C-Score: ${total})`;
           });
           scoreOutcome = ` ${verb} ${mag} C-Score point${mag === 1 ? "" : "s"} ${cscore < 0 ? "from" : "to"} ${applied.join(", ")}.`;
+          cScoreChange = { target: targets[0].name, delta: cscore };
         }
 
         const result = deps.sendMessage(chatId, {
@@ -201,6 +244,7 @@ export function createChatTools(deps: ChatDeps) {
           name: deps.agentName,
           content: message,
           timestamp: Date.now(),
+          ...(cScoreChange ? { cScoreChange } : {}),
         });
 
         if (!result.success) {
