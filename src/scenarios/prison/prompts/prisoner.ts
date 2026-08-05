@@ -51,7 +51,7 @@ Although the guards will enforce the regulations, it is up to you to decide whet
 
 - When you want to talk to someone, first use start_chat with their name, then use say to speak.
 - You can only say things inside an active chat. If say fails, you need to start_chat first.
-- When done talking, use leave_chat.
+- After you speak, wait for a reply. Only use leave_chat once the other person has responded and you are done, never in the same turn as speaking.
 - To move, use move_to_region with one of the exact region names listed above.
 - You MUST take action every turn. Do not just think — use your tools.`;
 }
