@@ -440,6 +440,7 @@ function buildTools(
       agentId,
       getRegions: () => bf.getRegions(),
       moveTo: bf.moveTo,
+      isGuard: runtime.config.role === "guard",
       forceMoveTo: runtime.config.role === "guard" ? bf.forceMoveTo : undefined,
       onMoveStart: (id, label, isForced, targetId) => {
         useAgentsStore.getState().updateMoveBubble(id, {
@@ -540,14 +541,46 @@ function getTickDelay(agentId: string): number {
 }
 
 /**
- * When a message is sent in a chat, notify the other participants
- * to tick sooner so they can respond. This creates the back-and-forth flow.
+ * The participant a message is addressed to ("Prisoner #N"/"Guard #N", or a
+ * guard when a prisoner says "officer"), or null if it can't be resolved.
+ */
+function addressedRecipient(chatId: string, speakerId: string): string | null {
+  const session = useChatsStore.getState().sessions[chatId];
+  if (!session || session.messages.length === 0) return null;
+  const text = session.messages[session.messages.length - 1].content;
+  const store = useAgentsStore.getState();
+  const others = session.participants
+    .filter((pid) => pid !== speakerId)
+    .map((pid) => ({ pid, agent: store.getAgent(pid) }))
+    .filter((x) => !!x.agent);
+
+  const named = text.match(/(prisoner|guard)\s*#?\s*(\d+)/i);
+  if (named) {
+    const want = `${named[1]} #${named[2]}`.toLowerCase();
+    const hit = others.find((x) => x.agent!.name.toLowerCase() === want);
+    if (hit) return hit.pid;
+  }
+  if (/\bofficer\b/i.test(text)) {
+    const guard = others.find((x) => x.agent!.role === "guard");
+    if (guard) return guard.pid;
+  }
+  return null;
+}
+
+/**
+ * After a message is sent, fast-tick the addressed participant so they get the
+ * next turn (or everyone, when the recipient can't be identified).
  */
 export function notifyChatPartners(chatId: string, speakerId: string): void {
   const session = useChatsStore.getState().sessions[chatId];
   if (!session) return;
 
-  for (const pid of session.participants) {
+  const addressed = addressedRecipient(chatId, speakerId);
+  const recipients = addressed
+    ? [addressed]
+    : session.participants.filter((pid) => pid !== speakerId);
+
+  for (const pid of recipients) {
     if (pid === speakerId) continue;
     const runtime = agentRuntimes.get(pid);
     if (!runtime || !runtime.running) continue;
@@ -555,9 +588,7 @@ export function notifyChatPartners(chatId: string, speakerId: string): void {
     // Only schedule if we don't already have a fast tick pending
     if (!pendingFastTicks.has(pid)) {
       pendingFastTicks.add(pid);
-      console.log(
-        `[AI] ${pid}: Fast tick (responding to ${speakerId} in chat)`,
-      );
+      console.log(`[AI] ${pid}: Fast tick (addressed by ${speakerId})`);
       setTimeout(() => {
         pendingFastTicks.delete(pid);
         tickAgent(pid);

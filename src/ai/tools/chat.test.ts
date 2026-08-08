@@ -256,6 +256,76 @@ describe("say cscore routing", () => {
       { id: "p1", delta: -1 },
     ]);
   });
+
+  it("holds a deduction for silence until the prisoner has had a turn", async () => {
+    const { deps, applied, messages } = makeDeps([GUARD, P1]);
+    const { say } = createChatTools(deps);
+
+    // Guard asked something a moment ago; the prisoner has not replied yet.
+    deps.sendMessage("chat1", {
+      id: "g1",
+      name: "Guard #1",
+      content: "Prisoner #1, answer me.",
+      timestamp: Date.now(),
+    });
+
+    const res = await say.execute(
+      { message: "Prisoner #1, your silence is a violation. -1.", cscore: -1 },
+      {} as any,
+    );
+
+    expect(applied).toEqual([]); // point held, not applied
+    expect(res.outcome).toContain("has not had a chance to reply");
+    expect(messages).toHaveLength(2); // the message still went out
+  });
+
+  it("applies a deduction once the prisoner has spoken since being addressed", async () => {
+    const { deps, applied } = makeDeps([GUARD, P1]);
+    const { say } = createChatTools(deps);
+
+    deps.sendMessage("chat1", {
+      id: "g1",
+      name: "Guard #1",
+      content: "Prisoner #1, report.",
+      timestamp: Date.now() - 2000,
+    });
+    deps.sendMessage("chat1", {
+      id: "p1",
+      name: "Prisoner #1",
+      content: "No, officer.",
+      timestamp: Date.now(),
+    });
+
+    const res = await say.execute(
+      { message: "Prisoner #1, that is disrespectful. -1.", cscore: -1 },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true);
+    expect(applied).toEqual([{ id: "p1", delta: -1 }]);
+  });
+});
+
+describe("leave_chat timing", () => {
+  it("refuses to leave in the same turn as speaking", async () => {
+    const { deps } = makeDeps([GUARD, P1]);
+    const { say, leave_chat } = createChatTools(deps);
+
+    await say.execute({ message: "Prisoner #1, hello." }, {} as any);
+    const res = await leave_chat.execute({}, {} as any);
+
+    expect(res.success).toBe(false);
+    expect(res.outcome).toContain("Wait for a reply");
+  });
+
+  it("allows leaving on a turn with no speaking", async () => {
+    const { deps } = makeDeps([GUARD, P1]);
+    const { leave_chat } = createChatTools(deps);
+
+    const res = await leave_chat.execute({}, {} as any);
+
+    expect(res.success).toBe(true);
+  });
 });
 
 describe("say cscore nudge", () => {

@@ -68,7 +68,12 @@ export interface ChatDeps {
   adjustCScore?: (prisonerId: string, delta: number) => number;
 }
 
+/** Grace a guard must give a prisoner to reply before a non-response deduction lands. */
+const RESPONSE_GRACE_MS = 15_000;
+
 export function createChatTools(deps: ChatDeps) {
+  // True once this agent speaks this tick; used to block leaving in the same turn.
+  let spokeThisTurn = false;
   return {
     start_chat: tool({
       description:
@@ -154,6 +159,7 @@ export function createChatTools(deps: ChatDeps) {
         let targets: Array<{ id: string; name: string; role: string }> = [];
         let scoreOutcome = "";
         let cScoreChange: { target: string; delta: number } | undefined;
+        let heldTarget: string | undefined;
         if (
           cscore !== undefined &&
           cscore !== 0 &&
@@ -229,14 +235,42 @@ export function createChatTools(deps: ChatDeps) {
             };
           }
 
-          const verb = cscore < 0 ? "Deducted" : "Added";
-          const mag = Math.abs(cscore);
-          const applied = targets.map((p) => {
-            const total = deps.adjustCScore!(p.id, cscore);
-            return `${p.name} (new C-Score: ${total})`;
-          });
-          scoreOutcome = ` ${verb} ${mag} C-Score point${mag === 1 ? "" : "s"} ${cscore < 0 ? "from" : "to"} ${applied.join(", ")}.`;
-          cScoreChange = { target: targets[0].name, delta: cscore };
+          // Hold a deduction if the target has not replied since the guard's own
+          // last message here and that was recent, so a pending turn is not
+          // punished as silence.
+          let holdForReply = false;
+          if (cscore < 0) {
+            const msgs = deps.getMessages(chatId);
+            let guardPrevTs = 0;
+            for (let i = msgs.length - 1; i >= 0; i--) {
+              if (msgs[i].id === deps.agentId) {
+                guardPrevTs = msgs[i].timestamp;
+                break;
+              }
+            }
+            const repliedSince =
+              guardPrevTs > 0 &&
+              msgs.some(
+                (m) => m.id === targets[0].id && m.timestamp > guardPrevTs,
+              );
+            holdForReply =
+              guardPrevTs > 0 &&
+              !repliedSince &&
+              Date.now() - guardPrevTs < RESPONSE_GRACE_MS;
+          }
+
+          if (holdForReply) {
+            heldTarget = targets[0].name;
+          } else {
+            const verb = cscore < 0 ? "Deducted" : "Added";
+            const mag = Math.abs(cscore);
+            const applied = targets.map((p) => {
+              const total = deps.adjustCScore!(p.id, cscore);
+              return `${p.name} (new C-Score: ${total})`;
+            });
+            scoreOutcome = ` ${verb} ${mag} C-Score point${mag === 1 ? "" : "s"} ${cscore < 0 ? "from" : "to"} ${applied.join(", ")}.`;
+            cScoreChange = { target: targets[0].name, delta: cscore };
+          }
         }
 
         const result = deps.sendMessage(chatId, {
@@ -263,6 +297,14 @@ export function createChatTools(deps: ChatDeps) {
 
         // Notify chat partners to respond quickly
         deps.onMessageSent?.(chatId, deps.agentId);
+        spokeThisTurn = true;
+
+        if (heldTarget) {
+          return {
+            success: true,
+            outcome: `${result.outcome} (C-Score change held: ${heldTarget} has not had a chance to reply yet, so penalising them for non-response would be premature. If they stay silent after this, deduct on a later turn.)`,
+          };
+        }
 
         if (scoreOutcome) {
           return { success: true, outcome: `${result.outcome}${scoreOutcome}` };
@@ -288,9 +330,16 @@ export function createChatTools(deps: ChatDeps) {
 
     leave_chat: tool({
       description:
-        "Leave your current conversation. Call this when you are done talking.",
+        "Leave your current conversation. Only call this once the other person has replied and you are done, not right after you speak.",
       parameters: z.object({}),
       execute: async () => {
+        if (spokeThisTurn) {
+          return {
+            success: false,
+            outcome:
+              "You just spoke. Wait for a reply before leaving. Use leave_chat on a later turn once the conversation is finished.",
+          };
+        }
         const chatId = deps.getCurrentChatId();
         if (!chatId)
           return { success: false, outcome: "You are not in a conversation." };

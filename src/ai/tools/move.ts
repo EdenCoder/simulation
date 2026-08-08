@@ -9,6 +9,8 @@ export interface MoveDeps {
   moveTo: (agentId: string, x: number, y: number) => Promise<boolean>;
   forceMoveTo?: (guardId: string, prisonerId: string, x: number, y: number) => Promise<boolean>;
   onMoveStart?: (agentId: string, label: string, isForced?: boolean, targetId?: string) => void;
+  /** Guards may enter restricted regions (Solitary); prisoners may not. */
+  isGuard?: boolean;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,6 +30,9 @@ export function createMoveTools(deps: MoveDeps): Record<string, any> {
         if (!target) {
           const available = regions.map((r) => r.label).filter((l) => l !== 'Escape').join(', ');
           return { success: false, outcome: `Region "${region}" not found. Available regions: ${available}` };
+        }
+        if (target.label.toLowerCase() === 'solitary' && !deps.isGuard) {
+          return { success: false, outcome: 'Solitary is locked. Only a guard can put you there.' };
         }
 
         const goalX = target.x + target.width / 2;
