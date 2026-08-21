@@ -1,16 +1,19 @@
-import React, { useEffect, useState } from 'react';
-import clsx from 'clsx';
+import clsx from "clsx";
+import React, { useEffect, useState } from "react";
 
-import { useAgentsStore, type AgentState } from '@/store/agents';
-import { AgentThought } from './agent/thought';
-import { AgentSpeech } from './agent/speech';
+import { type AgentState, useAgentsStore } from "@/store/agents";
+
+import { AgentSpeech } from "./agent/speech";
+import { AgentThought } from "./agent/thought";
 
 interface AgentProps {
   agentId: string;
 }
 
 export const Agent: React.FC<AgentProps> = ({ agentId }) => {
-  const [agentData, setAgentData] = useState<AgentState | undefined>(() => useAgentsStore.getState().getAgent(agentId));
+  const [agentData, setAgentData] = useState<AgentState | undefined>(() =>
+    useAgentsStore.getState().getAgent(agentId),
+  );
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -22,12 +25,14 @@ export const Agent: React.FC<AgentProps> = ({ agentId }) => {
 
   if (!agentData) return null;
 
-  const isGuard = agentData.role === 'guard';
-  const roleIcon = isGuard ? '🛡️' : '⛓️';
+  const isGuard = agentData.role === "guard";
+  const roleIcon = isGuard ? "🛡️" : "⛓️";
 
   const nameLabelClass = clsx(
-    'text-white text-xs px-1 py-0.5 rounded-sm font-mono whitespace-nowrap',
-    isGuard ? 'bg-blue-600/80 border border-blue-400' : 'bg-orange-600/80 border border-orange-400',
+    "text-white text-xs px-1 py-0.5 rounded-sm font-mono whitespace-nowrap",
+    isGuard
+      ? "bg-blue-600/80 border border-blue-400"
+      : "bg-orange-600/80 border border-orange-400",
   );
 
   const hasSpeech = !!agentData.speechBubble;
@@ -37,17 +42,29 @@ export const Agent: React.FC<AgentProps> = ({ agentId }) => {
   return (
     <div
       className="absolute pointer-events-none w-6 h-6 flex flex-col items-center"
-      style={{ left: `${agentData.x}px`, top: `${agentData.y}px`, transform: 'translate(-50%, -50%)' }}
+      style={{
+        left: `${agentData.x}px`,
+        top: `${agentData.y}px`,
+        transform: "translate(-50%, -50%)",
+      }}
     >
       {hasSpeech && (
         <div className="absolute bottom-full mb-1 z-25">
-          <AgentSpeech content={agentData.speechBubble!.content} timestamp={agentData.speechBubble!.timestamp} duration={agentData.speechBubble!.duration} />
+          <AgentSpeech
+            content={agentData.speechBubble!.content}
+            timestamp={agentData.speechBubble!.timestamp}
+            duration={agentData.speechBubble!.duration}
+          />
         </div>
       )}
 
       {hasThought && !hasSpeech && (
         <div className="absolute bottom-full mb-1 z-15">
-          <AgentThought content={agentData.thoughtBubble!.content} timestamp={agentData.thoughtBubble!.timestamp} duration={agentData.thoughtBubble!.duration} />
+          <AgentThought
+            content={agentData.thoughtBubble!.content}
+            timestamp={agentData.thoughtBubble!.timestamp}
+            duration={agentData.thoughtBubble!.duration}
+          />
         </div>
       )}
 
@@ -55,10 +72,23 @@ export const Agent: React.FC<AgentProps> = ({ agentId }) => {
         <div className={nameLabelClass}>
           <span className="mr-1">{roleIcon}</span>
           {agentData.name}
-          {agentData.currentEmoji && <span className="ml-1">{agentData.currentEmoji}</span>}
-          {hasMove && <span className="ml-1 font-semibold">{agentData.moveBubble?.isForced ? '🔗' : '→'} {agentData.moveBubble?.content}</span>}
+          {agentData.currentEmoji && (
+            <span className="ml-1">{agentData.currentEmoji}</span>
+          )}
+          {hasMove && (
+            <span className="ml-1 font-semibold">
+              {agentData.moveBubble?.isForced ? "🔗" : "→"}{" "}
+              {agentData.moveBubble?.content}
+            </span>
+          )}
           {!isGuard && (
-            <b className={clsx('ml-2', agentData.points > 0 && 'text-green-300', agentData.points < 0 && 'text-red-300')}>
+            <b
+              className={clsx(
+                "ml-2",
+                agentData.points > 0 && "text-green-300",
+                agentData.points < 0 && "text-red-300",
+              )}
+            >
               C:{agentData.points}
             </b>
           )}

@@ -29,8 +29,14 @@ export class Pathfinder {
     this.updateGrid();
   }
 
-  /** Rebuild the walkability grid from tilemap + door states. */
-  private updateGrid(): number[][] {
+  /**
+   * Rebuild the walkability grid from tilemap + door states.
+   *
+   * `ignoreLockedDoors` makes locked door tiles walkable — used for guards
+   * (who carry master keys) and for prisoners being escorted by a guard or
+   * by the schedule enforcer. For everyone else a locked door is a wall.
+   */
+  private updateGrid(ignoreLockedDoors = false): number[][] {
     const grid: number[][] = [];
 
     for (let y = 0; y < this.gridHeight; y++) {
@@ -51,10 +57,10 @@ export class Pathfinder {
         if (row && tile.x >= 0 && tile.x < row.length) {
           const isOpen = doorSprite.isDoorOpen();
           const isLocked = doorSprite.isDoorLocked();
-          if (isOpen && !isLocked) {
+          if (isLocked) {
+            row[tile.x] = ignoreLockedDoors ? this.WALKABLE : this.UNWALKABLE;
+          } else if (isOpen) {
             row[tile.x] = this.WALKABLE;
-          } else if (isLocked) {
-            row[tile.x] = this.UNWALKABLE;
           }
         }
       }
@@ -65,8 +71,12 @@ export class Pathfinder {
   }
 
   /** Find a path between two world-space points. Returns null if no path exists. */
-  findPath(start: Point, goal: Point): Promise<Point[] | null> {
-    const grid = this.updateGrid();
+  findPath(
+    start: Point,
+    goal: Point,
+    options?: { ignoreLockedDoors?: boolean },
+  ): Promise<Point[] | null> {
+    const grid = this.updateGrid(options?.ignoreLockedDoors ?? false);
 
     const startX = Phaser.Math.Clamp(Math.floor(start.x / 16), 0, this.gridWidth - 1);
     const startY = Phaser.Math.Clamp(Math.floor(start.y / 16), 0, this.gridHeight - 1);

@@ -15,6 +15,12 @@ export interface ChatMessage {
   timestamp: number;
   inflection?: string;
   /**
+   * Agent IDs that were in the session when this message was sent (excluding
+   * the sender). Snapshotted at send time so exports show who actually heard
+   * the message, not the session's final participant list.
+   */
+  recipients?: string[];
+  /**
    * The C-Score change this message applied, if any, keyed by target prisoner
    * name. Set by the `say` tool; exports sum these deltas in timestamp order
    * to get each line's running total.

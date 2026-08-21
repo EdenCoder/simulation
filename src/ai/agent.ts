@@ -6,29 +6,47 @@
  * Every ~8 seconds, each agent gets a fresh tick with updated dynamic context.
  */
 
-import { generateText, type CoreMessage } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { type CoreMessage, generateText } from "ai";
 
 import type { AgentConfig, RegionConfig } from "@/engine/types";
-import { useAgentsStore, type ChatMessage } from "@/store/agents";
+import { getGuardPrompt } from "@/scenarios/prison/prompts/guard";
+import { getPrisonerPrompt } from "@/scenarios/prison/prompts/prisoner";
+import {
+  getAssignedCell,
+  getScheduleContext,
+  getSchedulePhase,
+} from "@/scenarios/prison/schedule";
+import { type ChatMessage, useAgentsStore } from "@/store/agents";
 import { useChatsStore } from "@/store/chats";
 
-import { scheduleAgentCall } from "./rate-limiter";
-import { getTimeContext, getCurrentGameTime } from "./context/time";
+import {
+  acquireWarmupSlot,
+  isBackendWarmedUp,
+  markBackendWarmedUp,
+  releaseWarmupSlot,
+  resetBackendWarmup,
+} from "./backend-warmup";
+import { getChatCooldownRemaining, setChatCooldown } from "./chat-cooldown";
 import { getNearbyContext } from "./context/nearby";
-
-import { createMoveTools } from "./tools/move";
+import { getCurrentGameTime, getTimeContext } from "./context/time";
+import { isTimeoutError } from "./llm-errors";
+import { scheduleAgentCall } from "./rate-limiter";
 import { createChatTools } from "./tools/chat";
 import { createDoorTools, getDoorContext } from "./tools/door";
+import { createEmotionsTool, EmotionState } from "./tools/emotions";
 import { createMemoryTool, MemoryStore } from "./tools/memory";
+import { createMoveTools } from "./tools/move";
+import { getPointsContext } from "./tools/points";
 import {
   createRelationshipTools,
   RelationshipState,
 } from "./tools/relationship";
-import { getPointsContext } from "./tools/points";
-
-import { getPrisonerPrompt } from "@/scenarios/prison/prompts/prisoner";
-import { getGuardPrompt } from "@/scenarios/prison/prompts/guard";
+import {
+  createTaskTools,
+  getGuardTaskContext,
+  getPrisonerTaskContext,
+} from "./tools/tasks";
 
 // --- Persistent message log entry (never trimmed) ---
 
@@ -111,6 +129,7 @@ interface AgentRuntime {
   messages: CoreMessage[];
   memoryStore: MemoryStore;
   relationshipState: RelationshipState;
+  emotionState: EmotionState;
   running: boolean;
 }
 
@@ -123,6 +142,17 @@ const agentRuntimes = new Map<string, AgentRuntime>();
  */
 const chatTickCounts = new Map<string, { chatId: string; ticks: number }>();
 const MAX_CHAT_TICKS = 6;
+
+/** Chat break after being force-removed from an overlong conversation. */
+const CHAT_COOLDOWN_AFTER_TIMEOUT_MS = 45_000;
+
+/**
+ * Last time each agent started a movement. Agents that stand still too long
+ * (outside a conversation) get a restlessness nudge in their context —
+ * otherwise everyone congregates in one region and never moves.
+ */
+const lastMoveAt = new Map<string, number>();
+const RESTLESS_AFTER_MS = 90_000;
 
 /**
  * The initial user message every agent starts with. Also used as the
@@ -194,7 +224,7 @@ function recoverSayFromText(params: {
   // Match `say:` (case-insensitive), optionally wrapped in quotes, at the
   // start of the text or on its own line. Allow a leading newline from
   // the reasoning model's output conventions.
-  const match = text.match(/(?:^|\n)\s*say\s*[:\-]\s*["']?(.+?)["']?\s*$/is);
+  const match = text.match(/(?:^|\n)\s*say\s*[:-]\s*["']?(.+?)["']?\s*$/is);
   if (!match) return null;
 
   const message = match[1].trim();
@@ -240,6 +270,11 @@ export interface BridgeFunctions {
   }>;
   getRegions: () => RegionConfig[];
   getAgentWorldPosition: (agentId: string) => { x: number; y: number } | null;
+  escortAgentToRegion: (
+    agentId: string,
+    regionLabel: string,
+  ) => Promise<boolean>;
+  isAgentMoving: (agentId: string) => boolean;
 }
 
 let bridgeFns: BridgeFunctions | null = null;
@@ -310,9 +345,77 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
   const sections: string[] = [];
 
   sections.push(getTimeContext());
-  sections.push(getNearbyContext(agentId));
+
+  // Spatial awareness: every agent always knows exactly where they are.
+  const myRegion = getAgentRegion(agentId);
+  sections.push(
+    `[Your Location] You are currently in: ${myRegion === "unknown" ? "an unmapped part of the prison" : myRegion}`,
+  );
+
+  // Schedule phase and what it currently permits/requires.
+  const simTime = getCurrentGameTime();
+  if (simTime) {
+    sections.push(
+      getScheduleContext(
+        simTime,
+        runtime.config.role,
+        getAssignedCell(runtime.config.name),
+      ),
+    );
+  }
+
+  sections.push(getNearbyContext(agentId, getAgentRegion));
+
+  // A guard sees only the prisoners they are near — they have to patrol to
+  // find the rest. Listing every prisoner's position each turn would make
+  // the guards omniscient and remove any need to search.
+  if (runtime.config.role === "guard") {
+    const nearbyIds = new Set(
+      useChatsStore
+        .getState()
+        .getNearbyAgents(agentId)
+        .map((a) => a.id),
+    );
+    const prisoners = useAgentsStore
+      .getState()
+      .getAllAgents()
+      .filter((a) => a.role === "prisoner");
+    const visible = prisoners.filter((p) => nearbyIds.has(p.id));
+    if (prisoners.length > 0) {
+      const lines = visible.map((p) => {
+        const region = getAgentRegion(p.id);
+        const cell = getAssignedCell(p.name);
+        return `- ${p.name}: ${region === "unknown" ? "location unclear" : region}${cell ? ` (assigned to ${cell})` : ""}`;
+      });
+      const unseen = prisoners
+        .filter((p) => !nearbyIds.has(p.id))
+        .map((p) => p.name);
+      const body =
+        lines.length > 0
+          ? `You can see:\n${lines.join("\n")}\nDo not ask these prisoners where they are — you are looking at them.`
+          : "- (none in sight)";
+      const tail =
+        unseen.length > 0
+          ? `\nNot in sight: ${unseen.join(", ")}. You do not know where they are. Do NOT ask other prisoners or guards — leave_chat if needed and patrol with move_to_region until they appear above.`
+          : "";
+      sections.push(`[Prisoners In Sight]\n${body}${tail}`);
+    }
+    // Shared work-detail board. A prisoner's location is shown only when
+    // this guard can actually see them, matching [Prisoners In Sight].
+    sections.push(
+      getGuardTaskContext((name) => {
+        const p = prisoners.find((a) => a.name === name);
+        if (!p || !nearbyIds.has(p.id)) return "unknown";
+        return getAgentRegion(p.id);
+      }),
+    );
+  } else {
+    sections.push(getPrisonerTaskContext(runtime.config.name));
+  }
+
   sections.push(runtime.memoryStore.getContext());
   sections.push(runtime.relationshipState.getContext());
+  sections.push(runtime.emotionState.getContext());
 
   // Points context
   const agentsStore = useAgentsStore.getState();
@@ -359,6 +462,9 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
       );
       useChatsStore.getState().leaveSession(agent.currentChatId, agentId);
       chatTickCounts.delete(agentId);
+      // Break from chatting so the agent moves/acts instead of instantly
+      // re-entering another conversation.
+      setChatCooldown(agentId, CHAT_COOLDOWN_AFTER_TIMEOUT_MS);
       // After force-leaving, fall through to the "not in chat" branch below
     }
   } else {
@@ -374,9 +480,15 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
     const chatsStore = useChatsStore.getState();
     const session = chatsStore.getAgentSession(agentId);
     if (session) {
-      const participantNames = session.participants
+      const participantBits = session.participants
         .filter((pid) => pid !== agentId)
-        .map((pid) => agentsStore.getAgent(pid)?.name ?? pid)
+        .map((pid) => {
+          const name = agentsStore.getAgent(pid)?.name ?? pid;
+          const region = getAgentRegion(pid);
+          const where =
+            !region || region === "unknown" ? "" : ` (in ${region})`;
+          return `${name}${where}`;
+        })
         .join(", ");
 
       const messages = session.messages;
@@ -388,7 +500,8 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
         const lastSpeakerIsMe = lastMsg.id === agentId;
 
         sections.push(
-          `[ACTIVE CONVERSATION with ${participantNames}]\n` +
+          `[ACTIVE CONVERSATION with ${participantBits}]\n` +
+            `These people are with you — you can see them and already know where they are. Do not ask.\n` +
             `${chatLines.join("\n")}\n` +
             (lastSpeakerIsMe
               ? `(You spoke last. Wait for a response, or use leave_chat if done.)`
@@ -396,7 +509,8 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
         );
       } else {
         sections.push(
-          `[ACTIVE CONVERSATION with ${participantNames}]\n` +
+          `[ACTIVE CONVERSATION with ${participantBits}]\n` +
+            `These people are with you — you can see them and already know where they are. Do not ask.\n` +
             `(Conversation just started. Use the "say" tool to greet them.)`,
         );
       }
@@ -412,6 +526,22 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
         `[Note] ${names} ${nearbyInChat.length === 1 ? "is" : "are"} in a conversation nearby. You could use start_chat to join.`,
       );
     }
+
+    // Standing still too long: nudge toward purposeful movement.
+    const idleMs = Date.now() - (lastMoveAt.get(agentId) ?? Date.now());
+    if (idleMs > RESTLESS_AFTER_MS) {
+      sections.push(
+        `[Restlessness] You have been standing in ${myRegion} without moving for over ${Math.floor(idleMs / 60000)} minute(s). Do not linger in one spot — use move_to_region to go somewhere purposeful now (patrol, explore, or go where you are needed).`,
+      );
+    }
+
+    // On a chat break after an overlong conversation.
+    const cooldownMs = getChatCooldownRemaining(agentId);
+    if (cooldownMs > 0) {
+      sections.push(
+        `[Chat Break] You just spent a long time in one conversation. For the next ${Math.ceil(cooldownMs / 1000)}s you cannot start or join chats — move and act instead.`,
+      );
+    }
   }
 
   return sections.filter(Boolean).join("\n\n");
@@ -423,7 +553,7 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
  * Build tools for an agent. All deps use fresh getState() calls so they
  * always read the latest store values (not stale snapshots).
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 function buildTools(
   agentId: string,
   runtime: AgentRuntime,
@@ -442,7 +572,22 @@ function buildTools(
       moveTo: bf.moveTo,
       isGuard: runtime.config.role === "guard",
       forceMoveTo: runtime.config.role === "guard" ? bf.forceMoveTo : undefined,
+      getPrisoners: () =>
+        useAgentsStore
+          .getState()
+          .getAllAgents()
+          .filter((a) => a.role === "prisoner")
+          .map((a) => ({ id: a.id, name: a.name })),
+      getRegionOf: (id) => getAgentRegion(id),
+      getCurrentRegion: () => getAgentRegion(agentId),
+      assignedCell:
+        runtime.config.role === "prisoner"
+          ? getAssignedCell(runtime.config.name)
+          : null,
+      getGameTime: getCurrentGameTime,
       onMoveStart: (id, label, isForced, targetId) => {
+        lastMoveAt.set(id, Date.now());
+        if (targetId) lastMoveAt.set(targetId, Date.now());
         useAgentsStore.getState().updateMoveBubble(id, {
           content: `${isForced ? "🔗" : "🚶"} ${label}`,
           timestamp: Date.now(),
@@ -465,6 +610,13 @@ function buildTools(
       getCurrentChatId: () =>
         useAgentsStore.getState().getAgent(agentId)?.currentChatId ?? null,
       getNearbyAgents: () => useChatsStore.getState().getNearbyAgents(agentId),
+      getRegionOf: (id) => getAgentRegion(id),
+      getKnownAgents: () =>
+        useAgentsStore
+          .getState()
+          .getAllAgents()
+          .map((a) => ({ id: a.id, name: a.name })),
+      isGuard: runtime.config.role === "guard",
       createChat: (ids) => useChatsStore.getState().createSession(ids),
       joinChat: (chatId) =>
         useChatsStore.getState().joinSession(chatId, agentId),
@@ -493,9 +645,14 @@ function buildTools(
         else store.subtractPoints(prisonerId, -delta);
         return store.getPoints(prisonerId);
       },
+      getChatCooldownMs: () => getChatCooldownRemaining(agentId),
     }),
     ...createMemoryTool(runtime.memoryStore),
     ...createRelationshipTools(runtime.relationshipState),
+    ...createEmotionsTool(runtime.emotionState, {
+      onEmotionChange: (emoji) =>
+        useAgentsStore.getState().updateEmoji(agentId, emoji),
+    }),
   };
 
   // Guard-only tools
@@ -507,6 +664,19 @@ function buildTools(
         findDoorByRegions: bf.findDoorByRegions,
         getAllDoorStates: bf.getAllDoorStates,
         moveTo: bf.moveTo,
+      }),
+      createTaskTools({
+        guardName: runtime.config.name,
+        getPrisonerNames: () =>
+          useAgentsStore
+            .getState()
+            .getAllAgents()
+            .filter((a) => a.role === "prisoner")
+            .map((a) => a.name),
+        isWorkDetail: () => {
+          const now = getCurrentGameTime();
+          return now ? getSchedulePhase(now) === "work_detail" : false;
+        },
       }),
     );
   }
@@ -599,6 +769,30 @@ export function notifyChatPartners(chatId: string, speakerId: string): void {
 
 // --- Tick loop ---
 
+/**
+ * Hard cap on a single LLM call. Must sit above the serverless backend's
+ * ~90s cold start; a call stalled longer is presumed hung. Without it a
+ * stalled fetch never settles and the tick loop stops rescheduling.
+ */
+const LLM_CALL_TIMEOUT_MS = 120_000;
+
+/**
+ * First-call cap while the warmup gate is exclusive. Cold start (~90s)
+ * plus one generation can exceed 120s when only a single request is
+ * allowed through; aborting it restarts the worker and the spiral.
+ */
+const LLM_WARMUP_TIMEOUT_MS = 180_000;
+
+/**
+ * Agents with a tick in flight. A duplicate tick (fast-tick, watchdog
+ * restart) is dropped rather than queued — the running tick reschedules
+ * itself when it completes.
+ */
+const activeTicks = new Set<string>();
+
+/** Last time each agent entered tickAgent; the watchdog restarts stalled loops. */
+const lastTickAt = new Map<string, number>();
+
 async function tickAgent(agentId: string): Promise<void> {
   const runtime = agentRuntimes.get(agentId);
   if (!runtime || !runtime.running) return;
@@ -610,7 +804,30 @@ async function tickAgent(agentId: string): Promise<void> {
     return;
   }
 
+  if (activeTicks.has(agentId)) return;
+  activeTicks.add(agentId);
+  lastTickAt.set(agentId, Date.now());
+
+  let holdWarmupSlot = false;
+  let callTimeoutMs = LLM_CALL_TIMEOUT_MS;
   try {
+    // One in-flight request until the first success, so a cold serverless
+    // backend is not flooded by 9 concurrent aborts. No-op once warm.
+    const warmupHeartbeat = setInterval(() => {
+      lastTickAt.set(agentId, Date.now());
+    }, 30_000);
+    try {
+      await acquireWarmupSlot(agentId);
+    } finally {
+      clearInterval(warmupHeartbeat);
+    }
+    holdWarmupSlot = !isBackendWarmedUp();
+    if (!runtime.running) return;
+
+    callTimeoutMs = holdWarmupSlot
+      ? LLM_WARMUP_TIMEOUT_MS
+      : LLM_CALL_TIMEOUT_MS;
+
     // Build context/tools just before the call so dynamic state (region,
     // chat partners, points, etc.) is fresh when we actually hit the API,
     // not when we were originally queued behind the rate limiter.
@@ -627,6 +844,9 @@ async function tickAgent(agentId: string): Promise<void> {
         system: runtime.systemPrompt + "\n\n" + dynamicContext,
         messages: runtime.messages,
         tools,
+        // A hung request (serverless worker stall) must fail, not wait
+        // forever — see LLM_CALL_TIMEOUT_MS / LLM_WARMUP_TIMEOUT_MS.
+        abortSignal: AbortSignal.timeout(callTimeoutMs),
         maxSteps: 5,
         // Larger than strictly needed for OpenAI/OpenRouter models, but
         // thinking/reasoning models (e.g. Qwen3.6 which emits an internal
@@ -646,6 +866,9 @@ async function tickAgent(agentId: string): Promise<void> {
         },
       });
     });
+
+    markBackendWarmedUp();
+    holdWarmupSlot = false;
 
     // Append all response messages to history for continuity
     if (result.response?.messages) {
@@ -734,6 +957,17 @@ async function tickAgent(agentId: string): Promise<void> {
     };
     const status = err?.status ?? err?.statusCode;
     const is429 = status === 429 || err?.message?.includes("429");
+
+    // Our own abort timeout or a rate-limiter job expiration: expected
+    // while the serverless backend cold-starts or a worker stalls.
+    // Retry soon, without a stack trace.
+    if (isTimeoutError(err)) {
+      console.warn(
+        `[AI] ${agentId}: LLM call timed out after ${callTimeoutMs / 1000}s (backend cold start or stalled worker), retrying in 5s`,
+      );
+      setTimeout(() => tickAgent(agentId), 5000);
+      return;
+    }
     const is400 =
       status === 400 ||
       err?.message?.includes("400") ||
@@ -785,13 +1019,48 @@ async function tickAgent(agentId: string): Promise<void> {
     );
     if (!is429) console.error("[AI] Full error:", error);
     setTimeout(() => tickAgent(agentId), backoff);
+  } finally {
+    if (holdWarmupSlot) releaseWarmupSlot();
+    activeTicks.delete(agentId);
   }
+}
+
+// --- Tick watchdog ---
+
+/**
+ * Last-resort recovery: if an agent's loop stops rescheduling (an
+ * unsettled await, a lost timer), restart it. The abort timeout and job
+ * expiration should make this unreachable, but a silently dead agent
+ * corrupts a whole run, so it is worth the belt and braces.
+ */
+const WATCHDOG_STALL_MS = 5 * 60_000;
+const WATCHDOG_INTERVAL_MS = 60_000;
+let watchdogStarted = false;
+
+function startTickWatchdog(): void {
+  if (watchdogStarted) return;
+  watchdogStarted = true;
+  setInterval(() => {
+    const now = Date.now();
+    for (const [agentId, runtime] of agentRuntimes) {
+      if (!runtime.running) continue;
+      const last = lastTickAt.get(agentId) ?? 0;
+      if (last > 0 && now - last > WATCHDOG_STALL_MS) {
+        console.warn(
+          `[AI] ${agentId}: No tick for ${Math.round((now - last) / 1000)}s — watchdog restarting the loop`,
+        );
+        activeTicks.delete(agentId);
+        tickAgent(agentId);
+      }
+    }
+  }, WATCHDOG_INTERVAL_MS);
 }
 
 // --- Public API ---
 
 /** Initialize all agents and start their tick loops. */
 export function initAgents(agents: AgentConfig[]): void {
+  resetBackendWarmup();
   console.log(`[AI] Initializing ${agents.length} agents...`);
 
   agents.forEach((config, index) => {
@@ -801,10 +1070,12 @@ export function initAgents(agents: AgentConfig[]): void {
       messages: [{ role: "user", content: INITIAL_USER_MESSAGE }],
       memoryStore: new MemoryStore(),
       relationshipState: new RelationshipState(),
+      emotionState: new EmotionState(),
       running: true,
     };
 
     agentRuntimes.set(config.id, runtime);
+    lastMoveAt.set(config.id, Date.now());
 
     // Persist the initial message to the log
     messageLog.push({
@@ -822,8 +1093,13 @@ export function initAgents(agents: AgentConfig[]): void {
     console.log(
       `[AI] ${config.id} (${config.name}): First tick in ${delay / 1000}s`,
     );
+    // Stamp now so the watchdog also covers an agent whose very first
+    // tick never happens.
+    lastTickAt.set(config.id, Date.now());
     setTimeout(() => tickAgent(config.id), delay);
   });
+
+  startTickWatchdog();
 }
 
 /** Stop all agent tick loops. */
@@ -843,7 +1119,7 @@ export function getTotalMessages(): number {
 }
 
 /** Determine which region an agent is currently in based on their world position. */
-function getAgentRegion(agentId: string): string {
+export function getAgentRegion(agentId: string): string {
   if (!bridgeFns) return "unknown";
 
   // Use world-space coordinates from the Phaser sprite (not screen coords from Zustand)
@@ -906,6 +1182,11 @@ export function exportMessagesAsJSONL(): string {
       content: msg.content,
       timestamp: msg.timestamp,
       chatId: sessionId,
+      // Who was actually present when this message was sent (send-time
+      // snapshot); chatParticipants is the session's final roster.
+      to: (msg.recipients ?? participants.filter((pid) => pid !== msg.id)).map(
+        (pid) => agentsStore.getAgent(pid)?.name ?? pid,
+      ),
       chatParticipants: participants.map(
         (pid) => agentsStore.getAgent(pid)?.name ?? pid,
       ),

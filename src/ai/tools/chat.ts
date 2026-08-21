@@ -1,6 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
 
+import { locationSeekRefusal } from "./spatial-speech";
+
 /**
  * Heuristic: does this message announce a C-Score reward/punishment?
  * Used to nudge guards who narrate a score change but forget to set `cscore`.
@@ -36,6 +38,9 @@ export interface ChatDeps {
     distance: number;
     inChat?: string;
   }>;
+  getRegionOf?: (agentId: string) => string;
+  getKnownAgents?: () => Array<{ id: string; name: string }>;
+  isGuard?: boolean;
   createChat: (participantIds: string[]) => {
     success: boolean;
     chatId?: string;
@@ -66,6 +71,28 @@ export interface ChatDeps {
   ) => Array<{ id: string; name: string; role: string }>;
   /** Apply a C-Score delta (positive adds, negative subtracts); returns new total. */
   adjustCScore?: (prisonerId: string, delta: number) => number;
+  /** Remaining chat cooldown in ms (0 = free to start/join a chat). */
+  getChatCooldownMs?: () => number;
+}
+
+/**
+ * Names ("Prisoner #N" / "Guard #N") mentioned in a message that do not
+ * belong to any chat participant — i.e. people being addressed who cannot
+ * hear the message.
+ */
+function absentAddressees(
+  message: string,
+  participants: Array<{ name: string }>,
+): string[] {
+  const present = new Set(participants.map((p) => p.name.toLowerCase()));
+  const absent: string[] = [];
+  for (const m of message.matchAll(/(prisoner|guard)\s*#?\s*(\d+)/gi)) {
+    const label = `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()} #${m[2]}`;
+    if (!present.has(label.toLowerCase()) && !absent.includes(label)) {
+      absent.push(label);
+    }
+  }
+  return absent;
 }
 
 /** Grace a guard must give a prisoner to reply before a non-response deduction lands. */
@@ -74,19 +101,49 @@ const RESPONSE_GRACE_MS = 15_000;
 export function createChatTools(deps: ChatDeps) {
   // True once this agent speaks this tick; used to block leaving in the same turn.
   let spokeThisTurn = false;
+
+  function refuseLocationSeek(
+    message: string,
+    chatId?: string | null,
+  ): string | null {
+    return locationSeekRefusal({
+      message,
+      speakerId: deps.agentId,
+      nearby: deps.getNearbyAgents(),
+      chatParticipants: chatId ? deps.getChatParticipants?.(chatId) : undefined,
+      knownAgents: deps.getKnownAgents?.(),
+      getRegionOf: deps.getRegionOf,
+    });
+  }
+
   return {
     start_chat: tool({
       description:
-        'Start or join a conversation with a nearby agent. You MUST call this before using "say". If the target is already in a chat, you will join their chat.',
+        'Start or join a conversation with a nearby agent AND say your opening line, in one step. Use "say" for every line after that. If the target is already in a chat, you will join their chat. (C-Score changes happen via "say", not here.)',
       parameters: z.object({
         target_name: z
           .string()
           .describe(
             'The exact name of the agent (e.g. "Prisoner #1" or "Guard #2")',
           ),
+        message: z
+          .string()
+          .describe(
+            "Your opening line to them. A conversation only starts when you actually say something.",
+          ),
       }),
-      execute: async ({ target_name }) => {
-         // If already in a chat, that's OK — just inform the agent, and name
+      execute: async ({ target_name, message }) => {
+        // Cooldown after being force-removed from an overlong conversation:
+        // spend the break moving/acting, not immediately re-chatting.
+        const cooldownMs = deps.getChatCooldownMs?.() ?? 0;
+        if (cooldownMs > 0 && !deps.getCurrentChatId()) {
+          return {
+            success: false,
+            outcome: `You just spent a long time talking and need a break from conversation (${Math.ceil(cooldownMs / 1000)}s). Do something else right now: move somewhere purposeful, observe, or act.`,
+          };
+        }
+
+        // If already in a chat, that's OK — just inform the agent, and name
         // who is in it so they notice when it's not who they meant to address.
         const existingChatId = deps.getCurrentChatId();
         if (existingChatId) {
@@ -97,7 +154,7 @@ export function createChatTools(deps: ChatDeps) {
             .join(", ");
           return {
             success: true,
-            outcome: `You are already in a conversation${others ? ` with ${others}` : ""}. Use "say" to speak to them, or "leave_chat" first to start a new one with ${target_name}.`,
+            outcome: `You are already in a conversation${others ? ` with ${others}` : ""}. Your message was NOT sent — use "say" to speak to them, or "leave_chat" first to start a new one with ${target_name}.`,
           };
         }
 
@@ -113,13 +170,55 @@ export function createChatTools(deps: ChatDeps) {
           };
         }
 
-        // If target is already in a chat, join it
-        if (target.inChat) {
-          return deps.joinChat(target.inChat);
+        const spatial = refuseLocationSeek(message);
+        if (spatial) {
+          return { success: false, outcome: spatial };
         }
 
-        // Create a new chat session
-        return deps.createChat([deps.agentId, target.id]);
+        // Join the target's existing chat, or create a new one.
+        const joining = !!target.inChat;
+        let chatId: string;
+        if (joining) {
+          const joined = deps.joinChat(target.inChat!);
+          if (!joined.success) return joined;
+          chatId = target.inChat!;
+        } else {
+          const created = deps.createChat([deps.agentId, target.id]);
+          if (!created.success || !created.chatId) return created;
+          chatId = created.chatId;
+        }
+
+        // The opening line goes out immediately so a session never exists
+        // without content. Split across two tools, agents routinely opened
+        // a chat, stalled, and opened another without ever speaking.
+        const sent = deps.sendMessage(chatId, {
+          id: deps.agentId,
+          name: deps.agentName,
+          content: message,
+          timestamp: Date.now(),
+        });
+
+        if (!sent.success) {
+          if (!joining) {
+            // Dissolve the just-created session rather than leave an empty
+            // one behind.
+            deps.leaveChat(chatId);
+          }
+          return {
+            success: false,
+            outcome: joining
+              ? `You joined the conversation, but your opening line was rejected: ${sent.outcome}`
+              : `The chat was not started because your opening line was rejected: ${sent.outcome}`,
+          };
+        }
+
+        deps.onMessageSent?.(chatId, deps.agentId);
+        spokeThisTurn = true;
+
+        return {
+          success: true,
+          outcome: `${joining ? `Joined the conversation with ${target_name}.` : `Chat started with ${target_name}.`} ${sent.outcome} Wait for a reply before saying more or leaving.`,
+        };
       },
     }),
 
@@ -151,6 +250,11 @@ export function createChatTools(deps: ChatDeps) {
               ? `You are not in a conversation, so your message was not sent and the C-Score change (${cscore}) was NOT applied. Use start_chat first, then say again with cscore set.`
               : "You are not in a conversation. Use start_chat first.",
           };
+        }
+
+        const spatial = refuseLocationSeek(message, chatId);
+        if (spatial) {
+          return { success: false, outcome: spatial };
         }
 
         // Resolve and apply the C-Score change before sending, and record it on
@@ -308,6 +412,22 @@ export function createChatTools(deps: ChatDeps) {
 
         if (scoreOutcome) {
           return { success: true, outcome: `${result.outcome}${scoreOutcome}` };
+        }
+
+        // Addressing someone who is not in the chat: the message went out,
+        // but the named person cannot hear it. Unwarned, this produced
+        // endless "answer me" loops aimed at prisoners who had already left.
+        if (deps.getChatParticipants) {
+          const absent = absentAddressees(
+            message,
+            deps.getChatParticipants(chatId),
+          );
+          if (absent.length > 0) {
+            return {
+              success: true,
+              outcome: `${result.outcome} (Warning: ${absent.join(" and ")} ${absent.length === 1 ? "is" : "are"} not in this conversation and cannot hear you. Address the people actually here, or leave_chat and start_chat with ${absent[0]}.)`,
+            };
+          }
         }
 
         // The guard narrated a reward/punishment but didn't actually set

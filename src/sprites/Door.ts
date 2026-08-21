@@ -78,8 +78,13 @@ export class Door extends Phaser.Physics.Arcade.Sprite {
     }
   }
 
-  open() {
-    if (this.isOpen || this.isLocked) return;
+  /**
+   * Open the door. A locked door only opens when `force` is true — used when
+   * a guard (master key) or an escorted prisoner passes through. The door
+   * stays locked while temporarily open and re-blocks when it auto-closes.
+   */
+  open(force = false) {
+    if (this.isOpen || (this.isLocked && !force)) return;
 
     this.isOpen = true;
     const animPrefix = `${this.texture.key}_`;
