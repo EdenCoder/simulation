@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 
 import { locationSeekRefusal } from "./spatial-speech";
+import { workTaskRefusal, type TaskRecord } from "./tasks";
 
 /**
  * Heuristic: does this message announce a C-Score reward/punishment?
@@ -73,6 +74,8 @@ export interface ChatDeps {
   adjustCScore?: (prisonerId: string, delta: number) => number;
   /** Remaining chat cooldown in ms (0 = free to start/join a chat). */
   getChatCooldownMs?: () => number;
+  getPrisonerTask?: (prisonerName: string) => TaskRecord | undefined;
+  isWorkDetail?: () => boolean;
 }
 
 /**
@@ -136,6 +139,25 @@ export function createChatTools(deps: ChatDeps) {
     });
   }
 
+  function refuseWorkTalk(
+    message: string,
+    chatId?: string | null,
+    addresseeName?: string,
+  ): string | null {
+    if (!deps.getPrisonerTask) return null;
+    return workTaskRefusal({
+      message,
+      isGuard: !!deps.isGuard,
+      speakerName: deps.agentName,
+      addresseeName,
+      chatParticipants: chatId
+        ? deps.getChatParticipants?.(chatId)
+        : undefined,
+      getTask: deps.getPrisonerTask,
+      isWorkDetail: deps.isWorkDetail?.(),
+    });
+  }
+
   return {
     start_chat: tool({
       description:
@@ -193,6 +215,10 @@ export function createChatTools(deps: ChatDeps) {
         const spatial = refuseLocationSeek(message);
         if (spatial) {
           return { success: false, outcome: spatial };
+        }
+        const work = refuseWorkTalk(message, null, target_name);
+        if (work) {
+          return { success: false, outcome: work };
         }
 
         // Join the target's existing chat, or create a new one.
@@ -275,6 +301,10 @@ export function createChatTools(deps: ChatDeps) {
         const spatial = refuseLocationSeek(message, chatId);
         if (spatial) {
           return { success: false, outcome: spatial };
+        }
+        const work = refuseWorkTalk(message, chatId);
+        if (work) {
+          return { success: false, outcome: work };
         }
 
         // Resolve and apply the C-Score change before sending, and record it on

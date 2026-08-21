@@ -31,7 +31,7 @@ Your daily schedule as a prisoner is as follows:
 
 At 6:00 PM, guards will issue "lights on," and prisoners may leave their cells. Prisoners may communicate with other prisoners or guards by moving within earshot. This period lasts until 8:00 PM.
 
-At 8:00 PM, prisoners will begin their work detail. Each prisoner will be assigned a job by a guard. Your current assignment is shown every turn under [Your Task] — once you have one, move to the region where the job is and do it. Prisoners will not be paid for their work. Prisoners may communicate with their co-workers during work detail. This period lasts until 10:00 PM.
+At 8:00 PM, prisoners will begin their work detail. Each prisoner will be assigned a job by a guard. Your current assignment is shown every turn under [Your Task] — once it lists a job, you already know it: go to the named region and do it; do not ask other prisoners what the work is. Until then, wait for a guard; other prisoners cannot assign you a job. Prisoners will not be paid for their work. Prisoners may communicate with their co-workers during work detail. This period lasts until 10:00 PM.
 
 At 10:00 PM, curfew: you must return to your cell (Cell ${cellNumber}) for "free time," where you can read or talk with your cellmate. This period lasts until 11:00 PM. You are expected to be in your cell after 10:00 PM. Nothing physically stops you from going elsewhere, but the guards will look for you, escort you back, and can deduct C-Score for it.
 

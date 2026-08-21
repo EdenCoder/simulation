@@ -107,6 +107,21 @@ describe("getScheduleContext — guards and impossible orders", () => {
     expect(guardAt(20)).not.toContain("cannot comply");
   });
 
+  it("tells guards during work detail to assign unassigned prisoners before ordering work", () => {
+    const ctx = guardAt(20);
+    expect(ctx).toContain("UNASSIGNED");
+    expect(ctx).toContain("assign_task");
+    expect(ctx).toContain("start_chat");
+    expect(ctx).toContain("Do not order a prisoner to work");
+  });
+
+  it("tells prisoners during work detail to follow [Your Task] rather than ask around", () => {
+    const ctx = getScheduleContext(at(20), "prisoner", "Cell 1");
+    expect(ctx).toContain("[Your Task]");
+    expect(ctx).toContain("do not ask anyone what the work is");
+    expect(ctx).toContain("other prisoners cannot assign you one");
+  });
+
   it("keeps the prisoner-facing text unchanged in shape", () => {
     const ctx = getScheduleContext(at(2), "prisoner", "Cell 2");
     expect(ctx).toContain("you must remain in your cell (Cell 2)");

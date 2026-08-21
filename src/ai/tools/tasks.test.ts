@@ -6,6 +6,7 @@ import {
   getGuardTaskContext,
   getPrisonerTaskContext,
   getTask,
+  workTaskRefusal,
   type TaskDeps,
 } from "./tasks";
 
@@ -197,13 +198,42 @@ describe("getGuardTaskContext", () => {
     expect(ctx).toContain("Do not re-assign a task");
     expect(ctx).not.toContain("Every job is complete");
   });
+
+  it("lists UNASSIGNED prisoners during work detail so a partial roster is visible", async () => {
+    await assign(makeDeps(), "Prisoner #1", "mop the Shower");
+    const ctx = getGuardTaskContext(undefined, {
+      prisonerNames: PRISONERS,
+      isWorkDetail: true,
+    });
+    expect(ctx).toContain("Prisoner #1");
+    expect(ctx).toContain("Prisoner #2: UNASSIGNED");
+    expect(ctx).toContain("Prisoner #3: UNASSIGNED");
+    expect(ctx).toContain("use assign_task first");
+    expect(ctx).not.toContain("Every job is complete");
+  });
+
+  it("does not list UNASSIGNED names outside work detail", () => {
+    const ctx = getGuardTaskContext(undefined, {
+      prisonerNames: PRISONERS,
+      isWorkDetail: false,
+    });
+    expect(ctx).not.toContain("UNASSIGNED");
+    expect(ctx).toContain("No tasks assigned yet");
+  });
 });
 
 describe("getPrisonerTaskContext", () => {
-  it("tells an unassigned prisoner to wait for work detail", () => {
+  it("tells an unassigned prisoner not to ask others what the work will be", () => {
     const ctx = getPrisonerTaskContext("Prisoner #1");
     expect(ctx).toContain("[Your Task]");
     expect(ctx).toContain("No work assignment yet");
+    expect(ctx).toContain("do not ask them what the work will be");
+  });
+
+  it("during work detail, tells an unassigned prisoner to wait for a guard", () => {
+    const ctx = getPrisonerTaskContext("Prisoner #1", { isWorkDetail: true });
+    expect(ctx).toContain("Wait for a guard");
+    expect(ctx).toContain("do not ask them what the work is");
   });
 
   it("shows the prisoner their own assignment only", async () => {
@@ -229,5 +259,124 @@ describe("getPrisonerTaskContext", () => {
 
     const ctx = getPrisonerTaskContext("Prisoner #1");
     expect(ctx).toContain("do NOT report it again");
+  });
+});
+
+describe("assign_task announcement", () => {
+  it("tells the guard to leave_chat then start_chat to announce the job", async () => {
+    const result = await assign(makeDeps(), "Prisoner #1", "mop the Shower");
+    expect(result.success).toBe(true);
+    expect(result.outcome).toContain("start_chat with Prisoner #1");
+    expect(result.outcome).toContain("leave_chat first");
+  });
+});
+
+describe("workTaskRefusal", () => {
+  const assigned = {
+    prisonerName: "Prisoner #1",
+    task: "clean the Common Area",
+    assignedBy: "Guard #1",
+    assignedAt: 0,
+    status: "assigned" as const,
+  };
+
+  it("refuses a guard asking an unassigned prisoner what their task is", () => {
+    const outcome = workTaskRefusal({
+      message: "Prisoner #2, what is your task?",
+      isGuard: true,
+      speakerName: "Guard #1",
+      isWorkDetail: true,
+    });
+    expect(outcome).toContain("Prisoner #2 has no job");
+    expect(outcome).toContain("assign_task");
+  });
+
+  it("refuses a guard ordering an unassigned prisoner to get to work", () => {
+    const outcome = workTaskRefusal({
+      message: "Prisoner #4, I'll take that as your final answer. Now, get to work.",
+      isGuard: true,
+      speakerName: "Guard #1",
+      isWorkDetail: true,
+    });
+    expect(outcome).toContain("Prisoner #4 has no job");
+  });
+
+  it("uses the start_chat target when the message has no prisoner name", () => {
+    const outcome = workTaskRefusal({
+      message: "Get to work.",
+      isGuard: true,
+      speakerName: "Guard #1",
+      addresseeName: "Prisoner #2",
+      isWorkDetail: true,
+    });
+    expect(outcome).toContain("Prisoner #2 has no job");
+  });
+
+  it("lets a guard talk to a prisoner who already has a job", () => {
+    expect(
+      workTaskRefusal({
+        message: "Prisoner #1, get to work cleaning the Common Area immediately.",
+        isGuard: true,
+        speakerName: "Guard #1",
+        getTask: (name) => (name === "Prisoner #1" ? assigned : undefined),
+        isWorkDetail: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("lets a guard ask about status on an assigned job", () => {
+    expect(
+      workTaskRefusal({
+        message: "Prisoner #1, what is your status on the cleaning task?",
+        isGuard: true,
+        speakerName: "Guard #3",
+        getTask: (name) => (name === "Prisoner #1" ? assigned : undefined),
+        isWorkDetail: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses a prisoner who already has a job asking what the task is", () => {
+    const outcome = workTaskRefusal({
+      message: "Prisoner #5, do you know what the task is?",
+      isGuard: false,
+      speakerName: "Prisoner #1",
+      getTask: (name) => (name === "Prisoner #1" ? assigned : undefined),
+      isWorkDetail: true,
+    });
+    expect(outcome).toContain("You already have a job");
+    expect(outcome).toContain("clean the Common Area");
+  });
+
+  it("lets an unassigned prisoner ask a guard for a job", () => {
+    expect(
+      workTaskRefusal({
+        message: "Officer, do you know what our work assignment is?",
+        isGuard: false,
+        speakerName: "Prisoner #4",
+        isWorkDetail: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("lets ordinary speech through", () => {
+    expect(
+      workTaskRefusal({
+        message: "Prisoner #2, keep your voice down.",
+        isGuard: true,
+        speakerName: "Guard #1",
+        isWorkDetail: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("notes when it is not yet work detail", () => {
+    const outcome = workTaskRefusal({
+      message: "Prisoner #2, get to work.",
+      isGuard: true,
+      speakerName: "Guard #1",
+      isWorkDetail: false,
+    });
+    expect(outcome).toContain("not in session");
   });
 });

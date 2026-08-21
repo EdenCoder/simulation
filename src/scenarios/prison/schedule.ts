@@ -88,8 +88,8 @@ export function getScheduleContext(
       break;
     case "work_detail":
       line = isGuard
-        ? "Work detail (8-10 PM): assign tasks to prisoners and supervise their work."
-        : "Work detail (8-10 PM): perform the task a guard assigns you. You may talk to co-workers.";
+        ? "Work detail (8-10 PM): every prisoner needs a job on [Work Assignments]. Anyone listed UNASSIGNED still needs assign_task (a concrete job, naming the region); then announce it with start_chat. Do not order a prisoner to work, or ask what their task is, until they have one. Patrol and use complete_task when you have checked the work."
+        : "Work detail (8-10 PM): if [Your Task] lists a job, go do it — do not ask anyone what the work is. If you have no assignment yet, wait for a guard; other prisoners cannot assign you one. You may talk to co-workers.";
       break;
     case "free_time":
       line = isGuard

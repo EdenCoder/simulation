@@ -51,6 +51,7 @@ import {
   createTaskTools,
   getGuardTaskContext,
   getPrisonerTaskContext,
+  getTask,
 } from "./tools/tasks";
 
 // --- Persistent message log entry (never trimmed) ---
@@ -444,14 +445,28 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
     // Shared work-detail board. A prisoner's location is shown only when
     // this guard can actually see them, matching [Prisoners In Sight].
     sections.push(
-      getGuardTaskContext((name) => {
-        const p = prisoners.find((a) => a.name === name);
-        if (!p || !nearbyIds.has(p.id)) return "unknown";
-        return getAgentRegion(p.id);
-      }),
+      getGuardTaskContext(
+        (name) => {
+          const p = prisoners.find((a) => a.name === name);
+          if (!p || !visibleIds.has(p.id)) return "unknown";
+          return getAgentRegion(p.id);
+        },
+        {
+          prisonerNames: prisoners.map((p) => p.name),
+          isWorkDetail: simTime
+            ? getSchedulePhase(simTime) === "work_detail"
+            : false,
+        },
+      ),
     );
   } else {
-    sections.push(getPrisonerTaskContext(runtime.config.name));
+    sections.push(
+      getPrisonerTaskContext(runtime.config.name, {
+        isWorkDetail: simTime
+          ? getSchedulePhase(simTime) === "work_detail"
+          : false,
+      }),
+    );
   }
 
   sections.push(runtime.memoryStore.getContext());
@@ -693,6 +708,11 @@ function buildTools(
         return store.getPoints(prisonerId);
       },
       getChatCooldownMs: () => getChatCooldownRemaining(agentId),
+      getPrisonerTask: (name) => getTask(name),
+      isWorkDetail: () => {
+        const now = getCurrentGameTime();
+        return now ? getSchedulePhase(now) === "work_detail" : false;
+      },
     }),
     ...createMemoryTool(runtime.memoryStore),
     ...createRelationshipTools(runtime.relationshipState),

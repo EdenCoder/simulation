@@ -716,3 +716,61 @@ describe("say — region-aware visibility for location questions", () => {
     expect(res.outcome).toMatch(/already see/i);
   });
 });
+
+describe("say — work-detail task refusals", () => {
+  const assigned = {
+    prisonerName: "Prisoner #1",
+    task: "clean the Common Area",
+    assignedBy: "Guard #1",
+    assignedAt: 0,
+    status: "assigned" as const,
+  };
+
+  it("refuses a guard asking an unassigned prisoner what their task is", async () => {
+    const { deps } = makeDeps([GUARD, P2], {
+      isGuard: true,
+      getPrisonerTask: () => undefined,
+      isWorkDetail: () => true,
+    });
+    const { say } = createChatTools(deps);
+    const res = await say.execute(
+      { message: "Prisoner #2, what is your task?" },
+      {} as any,
+    );
+    expect(res.success).toBe(false);
+    expect(res.outcome).toMatch(/assign_task/i);
+  });
+
+  it("allows a guard to supervise a prisoner who already has a job", async () => {
+    const { deps } = makeDeps([GUARD, P1], {
+      isGuard: true,
+      getPrisonerTask: () => assigned,
+      isWorkDetail: () => true,
+    });
+    const { say } = createChatTools(deps);
+    const res = await say.execute(
+      { message: "Prisoner #1, I see you are cleaning the Common Area. Keep at it." },
+      {} as any,
+    );
+    expect(res.success).toBe(true);
+  });
+
+  it("refuses a prisoner who already has a job asking what the task is", async () => {
+    const P5: Participant = { id: "p5", name: "Prisoner #5", role: "prisoner" };
+    const { deps } = makeDeps([P1, P5], {
+      agentId: "p1",
+      agentName: "Prisoner #1",
+      isGuard: false,
+      canAdjustCScore: false,
+      getPrisonerTask: (name) => (name === "Prisoner #1" ? assigned : undefined),
+      isWorkDetail: () => true,
+    });
+    const { say } = createChatTools(deps);
+    const res = await say.execute(
+      { message: "Prisoner #5, what is the task for tonight?" },
+      {} as any,
+    );
+    expect(res.success).toBe(false);
+    expect(res.outcome).toMatch(/already have a job/i);
+  });
+});
