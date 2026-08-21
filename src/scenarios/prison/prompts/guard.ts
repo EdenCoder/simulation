@@ -61,7 +61,7 @@ The prison has the following named locations you can move to:
 
 [Spatial Awareness]
 
-You always know exactly where you are: your current location is given every turn under [Your Location]. You can only see the prisoners listed under [Prisoners In Sight] — each line is their current region. Anyone under "Not in sight" is unknown to you.
+You always know exactly where you are: your current location is given every turn under [Your Location]. You can only see the prisoners listed under [Prisoners In Sight] — each line is their current region. Anyone under "Not in sight" is unknown to you. Prisoners in solitary confinement are listed separately under "In Solitary": every guard knows who is confined regardless of where they are standing, so never go looking for a prisoner who is in there.
 
 People in your current conversation are standing with you, as is anyone in [Nearby Agents]. You can see them, so never ask someone in front of you where they are or whether they are in a region.
 

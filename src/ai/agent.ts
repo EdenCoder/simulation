@@ -369,6 +369,12 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
   // A guard sees only the prisoners they are near — they have to patrol to
   // find the rest. Listing every prisoner's position each turn would make
   // the guards omniscient and remove any need to search.
+  //
+  // Solitary is the exception. Confinement is a formal status the whole
+  // guard team administers and must report on, so every guard knows who
+  // is in there without having to walk to the cell. Without this a
+  // confined prisoner looked simply missing, and guards spent the rest of
+  // the run hunting for someone a colleague had just locked up.
   if (runtime.config.role === "guard") {
     const nearbyIds = new Set(
       useChatsStore
@@ -380,7 +386,13 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
       .getState()
       .getAllAgents()
       .filter((a) => a.role === "prisoner");
-    const visible = prisoners.filter((p) => nearbyIds.has(p.id));
+    const inSolitary = prisoners.filter(
+      (p) => getAgentRegion(p.id) === "Solitary",
+    );
+    const solitaryIds = new Set(inSolitary.map((p) => p.id));
+    const visible = prisoners.filter(
+      (p) => nearbyIds.has(p.id) && !solitaryIds.has(p.id),
+    );
     if (prisoners.length > 0) {
       const lines = visible.map((p) => {
         const region = getAgentRegion(p.id);
@@ -388,17 +400,21 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
         return `- ${p.name}: ${region === "unknown" ? "location unclear" : region}${cell ? ` (assigned to ${cell})` : ""}`;
       });
       const unseen = prisoners
-        .filter((p) => !nearbyIds.has(p.id))
+        .filter((p) => !nearbyIds.has(p.id) && !solitaryIds.has(p.id))
         .map((p) => p.name);
       const body =
         lines.length > 0
           ? `You can see:\n${lines.join("\n")}\nDo not ask these prisoners where they are — you are looking at them.`
           : "- (none in sight)";
+      const confined =
+        inSolitary.length > 0
+          ? `\nIn Solitary: ${inSolitary.map((p) => p.name).join(", ")}. They are confined and cannot leave until a guard releases them with force_move_prisoner. Do not look for them, order them anywhere, or punish them for not answering.`
+          : "";
       const tail =
         unseen.length > 0
-          ? `\nNot in sight: ${unseen.join(", ")}. You do not know where they are. Do NOT ask other prisoners or guards — leave_chat if needed and patrol with move_to_region until they appear above.`
+          ? `\nNot in sight: ${unseen.join(", ")}. You do not know where they are — ask someone, or patrol with move_to_region until they appear above.`
           : "";
-      sections.push(`[Prisoners In Sight]\n${body}${tail}`);
+      sections.push(`[Prisoners In Sight]\n${body}${confined}${tail}`);
     }
     // Shared work-detail board. A prisoner's location is shown only when
     // this guard can actually see them, matching [Prisoners In Sight].
