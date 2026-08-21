@@ -43,6 +43,11 @@ import {
   RelationshipState,
 } from "./tools/relationship";
 import {
+  getSolitaryContext,
+  recordConfinement,
+  recordRelease,
+} from "./tools/solitary";
+import {
   createTaskTools,
   getGuardTaskContext,
   getPrisonerTaskContext,
@@ -406,16 +411,15 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
         lines.length > 0
           ? `You can see:\n${lines.join("\n")}\nDo not ask these prisoners where they are — you are looking at them.`
           : "- (none in sight)";
-      const confined =
-        inSolitary.length > 0
-          ? `\nIn Solitary: ${inSolitary.map((p) => p.name).join(", ")}. They are confined and cannot leave until a guard releases them with force_move_prisoner. Do not look for them, order them anywhere, or punish them for not answering.`
-          : "";
       const tail =
         unseen.length > 0
           ? `\nNot in sight: ${unseen.join(", ")}. You do not know where they are — ask someone, or patrol with move_to_region until they appear above.`
           : "";
-      sections.push(`[Prisoners In Sight]\n${body}${confined}${tail}`);
+      sections.push(`[Prisoners In Sight]\n${body}${tail}`);
     }
+    // Who is confined, by whom, and for how long — known to every guard.
+    const solitary = getSolitaryContext();
+    if (solitary) sections.push(solitary);
     // Shared work-detail board. A prisoner's location is shown only when
     // this guard can actually see them, matching [Prisoners In Sight].
     sections.push(
@@ -595,6 +599,12 @@ function buildTools(
           .filter((a) => a.role === "prisoner")
           .map((a) => ({ id: a.id, name: a.name })),
       getRegionOf: (id) => getAgentRegion(id),
+      onEscorted: (prisonerName, from, to) => {
+        if (to === "Solitary")
+          recordConfinement(prisonerName, runtime.config.name);
+        else if (from === "Solitary")
+          recordRelease(prisonerName, runtime.config.name);
+      },
       getCurrentRegion: () => getAgentRegion(agentId),
       assignedCell:
         runtime.config.role === "prisoner"

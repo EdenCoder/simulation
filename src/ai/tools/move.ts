@@ -34,6 +34,12 @@ export interface MoveDeps {
   getPrisoners?: () => Array<{ id: string; name: string }>;
   /** Region another agent is currently in ("unknown" if unresolvable). */
   getRegionOf?: (agentId: string) => string;
+  /**
+   * Called after a successful escort, with where the prisoner came from
+   * and where they were taken. The prison scenario uses it to log solitary
+   * confinements and releases.
+   */
+  onEscorted?: (prisonerName: string, from: string, to: string) => void;
 }
 
 /**
@@ -191,6 +197,14 @@ export function createMoveTools(deps: MoveDeps): Record<string, any> {
 
         deps.onMoveStart?.(deps.agentId, region, true, resolvedId);
         const success = await forceMove(deps.agentId, resolvedId, goalX, goalY);
+
+        if (success) {
+          deps.onEscorted?.(
+            resolvedName,
+            prisonerRegion ?? "unknown",
+            target.label,
+          );
+        }
 
         return {
           success,

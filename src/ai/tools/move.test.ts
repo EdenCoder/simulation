@@ -294,3 +294,51 @@ describe("force_move_prisoner — prisoner resolution", () => {
     expect(result.outcome).toContain("Move to Prisoner #6's location first");
   });
 });
+
+describe("force_move_prisoner — escort reporting", () => {
+  const ROSTER2 = [{ id: "agent_6", name: "Prisoner #6" }];
+
+  function run(from: string, to: string, ok = true) {
+    const onEscorted = vi.fn();
+    const deps = makeDeps({
+      isGuard: true,
+      assignedCell: null,
+      forceMoveTo: vi.fn().mockResolvedValue(ok),
+      getPrisoners: () => ROSTER2,
+      getRegionOf: () => from,
+      onEscorted,
+    });
+    return { onEscorted, call: createMoveTools(deps).force_move_prisoner };
+  }
+
+  it("reports where the prisoner came from and went", async () => {
+    const { onEscorted, call } = run("Common Area", "Solitary");
+    await call.execute(
+      { prisoner_id: "Prisoner #6", region: "Solitary" },
+      { toolCallId: "t", messages: [] },
+    );
+    expect(onEscorted).toHaveBeenCalledWith(
+      "Prisoner #6",
+      "Common Area",
+      "Solitary",
+    );
+  });
+
+  it("does not report when the escort fails", async () => {
+    const { onEscorted, call } = run("Common Area", "Solitary", false);
+    await call.execute(
+      { prisoner_id: "Prisoner #6", region: "Solitary" },
+      { toolCallId: "t", messages: [] },
+    );
+    expect(onEscorted).not.toHaveBeenCalled();
+  });
+
+  it("does not report when no escort was needed", async () => {
+    const { onEscorted, call } = run("Solitary", "Solitary");
+    await call.execute(
+      { prisoner_id: "Prisoner #6", region: "Solitary" },
+      { toolCallId: "t", messages: [] },
+    );
+    expect(onEscorted).not.toHaveBeenCalled();
+  });
+});
