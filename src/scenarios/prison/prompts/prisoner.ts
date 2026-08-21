@@ -45,7 +45,7 @@ The prison has the following named locations you can move to:
 - Common Area — the main corridor and exercise area
 - Rec Room — recreation room off the corridor
 - Shower — the shower room
-- Guards — the guard room (off limits to you; nothing physically stops you entering, but the guards always know when a prisoner is in there and will punish it)
+- Guards — the guard room (the guards always know when you are in it; it is also the only way through to the Rec Room)
 - Delivery — supply area near the entry
 - Entry — the entry/exit area with the main door (only guards can unlock it)
 

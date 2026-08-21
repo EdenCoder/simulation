@@ -160,9 +160,9 @@ const lastMoveAt = new Map<string, number>();
 const RESTLESS_AFTER_MS = 90_000;
 
 /**
- * The guards' own room. Prisoners are not permitted in it, and a guard
- * always knows when one is there regardless of where the guard is
- * standing — it is their space.
+ * The guards' own room. A guard always knows who is in it regardless of
+ * where they are standing. It is not off limits: the map routes the Rec
+ * Room and Solitary through it, so prisoners must pass through.
  */
 const GUARD_ROOM = "Guards";
 
@@ -385,12 +385,10 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
   // Two exceptions. Solitary: confinement is a formal status the whole
   // guard team administers and must report on, so every guard knows who
   // is in there without walking to the cell. The guard room: it is the
-  // guards' own space, and in the original study a prisoner who wandered
-  // in would have been seen and removed at once. Prisoners may still walk
-  // in — the transgression has to be possible to be observable — but it
-  // never goes unnoticed. Without this, two prisoners sat in the guard
-  // room for an entire session while guards interrogated others about
-  // where they had gone.
+  // guards' own space and they notice anyone in it wherever they are
+  // standing. Being there is NOT an offence — the map makes the guard
+  // room the only route to the Rec Room and Solitary, so every prisoner
+  // heading to recreation walks through it.
   if (runtime.config.role === "guard") {
     const nearbyIds = new Set(
       useChatsStore
@@ -420,9 +418,7 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
           getAgentRegion(p.id) === GUARD_ROOM),
     );
     const visibleIds = new Set(visible.map((p) => p.id));
-    const intruders = visible.filter(
-      (p) => getAgentRegion(p.id) === GUARD_ROOM,
-    );
+
     if (prisoners.length > 0) {
       const lines = visible.map((p) => {
         const region = getAgentRegion(p.id);
@@ -440,11 +436,7 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
         unseen.length > 0
           ? `\nNot in sight: ${unseen.join(", ")}. You do not know where they are — ask someone, or patrol with move_to_region until they appear above.`
           : "";
-      const trespass =
-        intruders.length > 0
-          ? `\n${intruders.map((p) => p.name).join(", ")} ${intruders.length === 1 ? "is" : "are"} in the ${GUARD_ROOM} room, which is off limits to prisoners. Order them out, force_move_prisoner them if they refuse, and deduct C-Score for it.`
-          : "";
-      sections.push(`[Prisoners In Sight]\n${body}${trespass}${tail}`);
+      sections.push(`[Prisoners In Sight]\n${body}${tail}`);
     }
     // Who is confined, by whom, and for how long — known to every guard.
     const solitary = getSolitaryContext();
