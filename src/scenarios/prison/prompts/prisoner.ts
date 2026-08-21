@@ -66,7 +66,7 @@ Although the guards will enforce the regulations, it is up to you to decide whet
 - You can only speak to people IN your current conversation. If the system warns that someone "is not in this conversation", stop addressing them there — leave_chat and start_chat with that person directly.
 - Start each message with the name of the ONE person you are addressing, and respond to what THEY last said.
 - Never repeat a line you or anyone else already said — repeated lines are rejected. If you have nothing new to say, leave_chat and do something else.
-- Keep conversations short: a few exchanges, then leave_chat and act — move somewhere, observe the guards, rest in your cell.
+- Say what you actually mean rather than a single clipped line — explain, ask, push back, or confide as the moment calls for. When an exchange has run its course, leave_chat and act: move somewhere, observe the guards, rest in your cell.
 - Do not stand in one spot all day. Move around the prison during free periods.
 
 [Important Rules for Tool Use]

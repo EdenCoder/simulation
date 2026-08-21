@@ -395,9 +395,18 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
       (p) => getAgentRegion(p.id) === "Solitary",
     );
     const solitaryIds = new Set(inSolitary.map((p) => p.id));
+    // Anyone sharing your region is in the same room, so you can see them
+    // even when they are across it. Proximity alone is not enough: the
+    // radius is smaller than the larger regions, so two agents standing at
+    // opposite ends of the Common Area were invisible to each other while
+    // holding a conversation — guards then demanded to know where someone
+    // standing in front of them was.
     const visible = prisoners.filter(
-      (p) => nearbyIds.has(p.id) && !solitaryIds.has(p.id),
+      (p) =>
+        !solitaryIds.has(p.id) &&
+        (nearbyIds.has(p.id) || getAgentRegion(p.id) === myRegion),
     );
+    const visibleIds = new Set(visible.map((p) => p.id));
     if (prisoners.length > 0) {
       const lines = visible.map((p) => {
         const region = getAgentRegion(p.id);
@@ -405,7 +414,7 @@ function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
         return `- ${p.name}: ${region === "unknown" ? "location unclear" : region}${cell ? ` (assigned to ${cell})` : ""}`;
       });
       const unseen = prisoners
-        .filter((p) => !nearbyIds.has(p.id) && !solitaryIds.has(p.id))
+        .filter((p) => !visibleIds.has(p.id) && !solitaryIds.has(p.id))
         .map((p) => p.name);
       const body =
         lines.length > 0

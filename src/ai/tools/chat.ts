@@ -102,6 +102,26 @@ export function createChatTools(deps: ChatDeps) {
   // True once this agent speaks this tick; used to block leaving in the same turn.
   let spokeThisTurn = false;
 
+  /**
+   * Everyone the speaker can see: those within proximity, plus anyone
+   * sharing their region. The proximity radius is smaller than the larger
+   * regions, so without the second half two agents at opposite ends of the
+   * same room count as invisible to each other.
+   */
+  function visibleToSpeaker(): Array<{ id: string; name: string }> {
+    const nearby = deps.getNearbyAgents();
+    const myRegion = deps.getRegionOf?.(deps.agentId);
+    if (!myRegion || myRegion === "unknown") return nearby;
+    const seen = new Set(nearby.map((a) => a.id));
+    const sameRegion = (deps.getKnownAgents?.() ?? []).filter(
+      (a) =>
+        a.id !== deps.agentId &&
+        !seen.has(a.id) &&
+        deps.getRegionOf?.(a.id) === myRegion,
+    );
+    return [...nearby, ...sameRegion];
+  }
+
   function refuseLocationSeek(
     message: string,
     chatId?: string | null,
@@ -109,7 +129,7 @@ export function createChatTools(deps: ChatDeps) {
     return locationSeekRefusal({
       message,
       speakerId: deps.agentId,
-      nearby: deps.getNearbyAgents(),
+      nearby: visibleToSpeaker(),
       chatParticipants: chatId ? deps.getChatParticipants?.(chatId) : undefined,
       knownAgents: deps.getKnownAgents?.(),
       getRegionOf: deps.getRegionOf,

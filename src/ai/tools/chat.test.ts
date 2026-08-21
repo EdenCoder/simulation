@@ -655,3 +655,64 @@ describe("location interrogation refusal", () => {
     expect(messages).toHaveLength(1);
   });
 });
+
+describe("say — region-aware visibility for location questions", () => {
+  const G: Participant = { id: "g1", name: "Guard #1", role: "guard" };
+  const P3: Participant = { id: "p3", name: "Prisoner #3", role: "prisoner" };
+
+  // The proximity radius (100 units) is smaller than the larger regions, so
+  // sharing a region must count as seeing someone. Otherwise a guard asks
+  // where a prisoner standing across the same room is.
+  it("refuses a location question about someone in the same region but out of radius", async () => {
+    const { deps } = makeDeps([G, P1], {
+      isGuard: true,
+      getNearbyAgents: () => [], // nobody within the radius
+      getKnownAgents: () => [{ id: "p3", name: "Prisoner #3" }],
+      getRegionOf: () => "Common Area", // guard and #3 share the room
+    });
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #1, where is Prisoner #3?" },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.outcome).toMatch(/already see Prisoner #3/i);
+  });
+
+  it("allows a location question about someone in a different region", async () => {
+    const { deps } = makeDeps([G, P1], {
+      isGuard: true,
+      getNearbyAgents: () => [],
+      getKnownAgents: () => [{ id: "p3", name: "Prisoner #3" }],
+      getRegionOf: (id: string) => (id === "g1" ? "Common Area" : "Rec Room"),
+    });
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #1, where is Prisoner #3?" },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true);
+  });
+
+  it("falls back to proximity when the region is unknown", async () => {
+    const { deps } = makeDeps([G, P1], {
+      isGuard: true,
+      getNearbyAgents: () => [{ id: "p3", name: "Prisoner #3", distance: 20 }],
+      getKnownAgents: () => [{ id: "p3", name: "Prisoner #3" }],
+      getRegionOf: () => "unknown",
+    });
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #1, where is Prisoner #3?" },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.outcome).toMatch(/already see/i);
+  });
+});
