@@ -1,18 +1,20 @@
-import React from "react";
-import { Download } from "lucide-react";
-
-import { Button } from "@/ui/shadcn/button";
-import { Agents } from "./agents";
-import { AgentDialog } from "./agent/dialog";
-import { HUD } from "./hud";
-import { BuildUI } from "./BuildUI";
-import { DoorOverlay } from "./DoorOverlay";
-import { RegionOverlay } from "./RegionOverlay";
-import { exportMessagesAsJSONL } from "@/ai/agent";
-import { useChatsStore } from "@/store/chats";
-import { useAgentsStore } from "@/store/agents";
-
 import "@/globals.css";
+
+import { Download } from "lucide-react";
+import React from "react";
+
+import { exportMessagesAsJSONL } from "@/ai/agent";
+import { useAgentsStore } from "@/store/agents";
+import { useChatsStore } from "@/store/chats";
+import { Button } from "@/ui/shadcn/button";
+
+import { AgentDialog } from "./agent/dialog";
+import { Agents } from "./agents";
+import { BuildUI } from "./BuildUI";
+import { ChatLog } from "./ChatLog";
+import { DoorOverlay } from "./DoorOverlay";
+import { HUD } from "./hud";
+import { RegionOverlay } from "./RegionOverlay";
 
 export const Overlay: React.FC = () => {
   return (
@@ -21,6 +23,7 @@ export const Overlay: React.FC = () => {
       <DoorOverlay />
       <RegionOverlay />
       <HUD />
+      <ChatLog />
       <BuildUI />
       <AgentDialog />
 
@@ -43,9 +46,12 @@ export const Overlay: React.FC = () => {
               for (const msg of session.messages) {
                 const senderName =
                   agentsStore.getAgent(msg.id)?.name ?? msg.name;
-                const recipients = session.participants
-                  .filter((pid) => pid !== msg.id)
-                  .map((pid) => agentsStore.getAgent(pid)?.name ?? pid);
+                // Prefer the send-time snapshot; the session's final
+                // participant list misrepresents who actually heard it.
+                const recipients = (
+                  msg.recipients ??
+                  session.participants.filter((pid) => pid !== msg.id)
+                ).map((pid) => agentsStore.getAgent(pid)?.name ?? pid);
                 lines.push({
                   chatId: session.id,
                   from: senderName,

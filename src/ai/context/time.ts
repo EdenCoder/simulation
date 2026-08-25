@@ -18,7 +18,17 @@ export function initSimulationTime(): void {
 /** Get the current in-simulation time, or null if not started. */
 export function getCurrentGameTime(): Date | null {
   if (startTime === null) return null;
-  const elapsed = Date.now() - startTime;
+  return realToSimTime(Date.now());
+}
+
+/**
+ * Convert a real-world timestamp (ms epoch) to the in-simulation time it
+ * corresponds to, or null if the simulation hasn't started. Lets the UI
+ * show past events (e.g. chat messages) on the simulation clock.
+ */
+export function realToSimTime(realTimestamp: number): Date | null {
+  if (startTime === null) return null;
+  const elapsed = realTimestamp - startTime;
   const simElapsed = elapsed * 2; // 2x realtime
 
   // Start at 6:00 PM today
@@ -30,12 +40,12 @@ export function getCurrentGameTime(): Date | null {
 /** Build a system prompt section describing the current time. Unambiguous 24h + 12h format. */
 export function getTimeContext(): string {
   const time = getCurrentGameTime();
-  if (!time) return '';
+  if (!time) return "";
 
   const hours = time.getHours();
-  const minutes = time.getMinutes().toString().padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const minutes = time.getMinutes().toString().padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
   const h12 = hours % 12 || 12;
 
-  return `[Current Simulation Time] ${h12}:${minutes} ${ampm} (${hours.toString().padStart(2, '0')}:${minutes} 24h format)`;
+  return `[Current Simulation Time] ${h12}:${minutes} ${ampm} (${hours.toString().padStart(2, "0")}:${minutes} 24h format)`;
 }

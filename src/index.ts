@@ -8,6 +8,7 @@ import { useAgentsStore, type AgentState } from './store/agents';
 import { useSimulationStore } from './store/simulation';
 import { prisonScenario } from './scenarios/prison';
 import { initAgents, setBridgeFunctions } from './ai/agent';
+import { startScheduleEnforcer } from './ai/schedule-enforcer';
 import { getBridgeFunctions } from './bridge';
 
 // --- 1. Initialize the Zustand agent store from scenario config ---
@@ -99,4 +100,6 @@ waitForSceneReady().then(() => {
   const bridge = getBridgeFunctions();
   setBridgeFunctions(bridge);
   initAgents(prisonScenario.agents);
+  // Programmatic curfew (10 PM) + lights out (11 PM) enforcement
+  startScheduleEnforcer(bridge);
 });

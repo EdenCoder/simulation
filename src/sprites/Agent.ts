@@ -27,6 +27,14 @@ export class Agent extends Phaser.Physics.Arcade.Sprite {
   private targetX : number;
   private targetY : number;
   private isMoving : boolean = false;
+  /**
+   * True while this agent is being escorted (guard force-move or the
+   * schedule enforcer walking them to their cell). Escorted agents path
+   * through locked doors — the escorting guard opens them.
+   */
+  private escorted : boolean = false;
+  /** Monotonic id of the latest escort, so superseded escorts don't clear the flag. */
+  private escortEpoch : number = 0;
   private isPaused : boolean = false;
   private isHalfSpeed : boolean = false;
   private pauseTimer : number = 0;
@@ -227,16 +235,28 @@ export class Agent extends Phaser.Physics.Arcade.Sprite {
   }
 
 
+  /** Resolve and clear the pending movement promise, if any. */
+  private resolvePendingMovement(success : boolean) {
+    if (this.movementResolve) {
+      this.movementResolve(success);
+      this.movementResolve = null;
+    }
+  }
+
   public async setTarget(x : number, y : number, halfSpeed : boolean = false): Promise<boolean> {
+    // A new target supersedes any in-flight movement — resolve its promise
+    // as failed so callers awaiting the old move never hang.
+    this.resolvePendingMovement(false);
+
     this.targetX = x;
     this.targetY = y;
     this.isHalfSpeed = halfSpeed;
-    
+
     // Create a new promise for this movement
     this.movementPromise = new Promise<boolean>((resolve) => {
       this.movementResolve = resolve;
     });
-    
+
     if (!this.pathfindingEnabled || !this.pathfinder) {
       // Fallback to direct movement
       this.isMoving = true;
@@ -244,13 +264,16 @@ export class Agent extends Phaser.Physics.Arcade.Sprite {
       this.currentPath = [];
       return this.movementPromise;
     }
-    
+
     // Calculate path using A* pathfinding
     const start = { x: this.x, y: this.y };
     const goal = { x: this.targetX, y: this.targetY };
-    
+
+    // Guards carry master keys; escorted prisoners pass with their escort.
+    const ignoreLockedDoors = this.role === 'guard' || this.escorted;
+
     try {
-      this.currentPath = await this.pathfinder.findPath(start, goal) || [];
+      this.currentPath = await this.pathfinder.findPath(start, goal, { ignoreLockedDoors }) || [];
     } catch (error) {
       // Fallback to direct movement
       this.currentPath = [goal];
@@ -263,10 +286,7 @@ export class Agent extends Phaser.Physics.Arcade.Sprite {
     
     if (!this.isMoving) {
       // No path found, resolve as failure
-      if (this.movementResolve) {
-        this.movementResolve(false);
-        this.movementResolve = null;
-      }
+      this.resolvePendingMovement(false);
       this.isPaused = true;
       this.pauseTimer = 1000 + Math.random() * 2000;
     }
@@ -470,6 +490,37 @@ export class Agent extends Phaser.Physics.Arcade.Sprite {
   // Get Agent ID
   getId() : string {
     return this.id;
+  }
+
+  getRole() : 'prisoner' | 'guard' {
+    return this.role;
+  }
+
+  /** True while this agent is being escorted through locked doors. */
+  isEscorted() : boolean {
+    return this.escorted;
+  }
+
+  /** True while a movement is in progress. */
+  isCurrentlyMoving() : boolean {
+    return this.isMoving;
+  }
+
+  /**
+   * Move as an escorted agent: locked doors open for the escort (guard
+   * force-move or schedule enforcement). The flag is cleared when the
+   * movement finishes, succeeds or not. If a newer escort supersedes this
+   * one, the superseded call must not clear the newer escort's flag —
+   * hence the epoch check.
+   */
+  public async escortTo(x : number, y : number, halfSpeed : boolean = false): Promise<boolean> {
+    const epoch = ++this.escortEpoch;
+    this.escorted = true;
+    try {
+      return await this.setTarget(x, y, halfSpeed);
+    } finally {
+      if (epoch === this.escortEpoch) this.escorted = false;
+    }
   }
 
   /**

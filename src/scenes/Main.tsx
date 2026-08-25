@@ -7,7 +7,7 @@ import { Depth, key, TilemapLayer, TILESET_NAME } from "../constants";
 import { useSimulationStore } from "../store/simulation";
 import { loadBuildAsync, SavedDoor, SavedRegion } from "../store/build";
 import { AgentManager } from "../managers";
-import { Door, Region } from "../sprites";
+import { Agent, Door, Region } from "../sprites";
 import { initSimulationTime } from "../ai/context/time";
 
 /**
@@ -197,8 +197,16 @@ export class Main extends Phaser.Scene {
       this.doors,
       (agent, door) => {
         const doorSprite = door as Door;
+        const agentSprite = agent as unknown as Agent;
         if (!doorSprite.isDoorLocked()) {
           doorSprite.open();
+          return;
+        }
+        // Locked door: opens only for guards (master key) and prisoners
+        // being escorted by a guard or the schedule enforcer. It re-locks
+        // behind them when it auto-closes.
+        if (agentSprite.getRole?.() === "guard" || agentSprite.isEscorted?.()) {
+          doorSprite.open(true);
         }
       },
     );

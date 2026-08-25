@@ -22,7 +22,7 @@
       "type": "horizontal",
       "position": "left",
       "isOpen": false,
-      "isLocked": false
+      "isLocked": true
     },
     {
       "x": 280,

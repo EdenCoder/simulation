@@ -32,9 +32,7 @@ function qpsToMinTime(qps: number): number {
 
 /** Global upper-bound limiter, or null if disabled. */
 const globalLimiter: Bottleneck | null =
-  GLOBAL_QPS > 0
-    ? new Bottleneck({ minTime: qpsToMinTime(GLOBAL_QPS) })
-    : null;
+  GLOBAL_QPS > 0 ? new Bottleneck({ minTime: qpsToMinTime(GLOBAL_QPS) }) : null;
 
 const agentLimiters = new Map<string, Bottleneck>();
 
@@ -70,14 +68,27 @@ function getAgentLimiter(agentId: string, role: string): Bottleneck {
 }
 
 /**
+ * Safety net: a job that neither resolves nor rejects within this window
+ * is expired by Bottleneck (the returned promise rejects). With
+ * `maxConcurrent: 1` a single hung request would otherwise hold the
+ * agent's only slot forever and stop its tick loop. Set above the
+ * warmup abort (180s) so the abort fires first in the normal case.
+ */
+const JOB_EXPIRATION_MS = 210_000;
+
+/**
  * Schedule an async function to run under the agent's rate limit. The
  * returned promise resolves with the function's return value once it
- * has been allowed to run and has completed.
+ * has been allowed to run and has completed, or rejects if the job
+ * expires (see JOB_EXPIRATION_MS).
  */
 export function scheduleAgentCall<T>(
   agentId: string,
   role: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return getAgentLimiter(agentId, role).schedule(fn);
+  return getAgentLimiter(agentId, role).schedule(
+    { expiration: JOB_EXPIRATION_MS },
+    fn,
+  );
 }

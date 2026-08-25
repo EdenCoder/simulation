@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createChatTools, type ChatDeps } from "@/ai/tools/chat";
+import { type ChatDeps, createChatTools } from "@/ai/tools/chat";
 
 type Participant = { id: string; name: string; role: string };
 type Message = {
@@ -142,7 +142,7 @@ describe("say cscore routing", () => {
 
     expect(applied).toEqual([{ id: "p1", delta: -1 }]);
   });
-    it("refuses to apply cscore when the named target is not in the chat", async () => {
+  it("refuses to apply cscore when the named target is not in the chat", async () => {
     const { deps, applied, messages } = makeDeps([GUARD, P1]);
     const { say } = createChatTools(deps);
 
@@ -181,10 +181,7 @@ describe("say cscore routing", () => {
     const { deps, messages } = makeDeps([GUARD, P1]);
     const { say } = createChatTools(deps);
 
-    await say.execute(
-      { message: "Watch it. -1.", cscore: -1 },
-      {} as any,
-    );
+    await say.execute({ message: "Watch it. -1.", cscore: -1 }, {} as any);
 
     expect(messages).toHaveLength(1);
     expect(messages[0].cScoreChange).toEqual({
@@ -215,7 +212,9 @@ describe("say cscore routing", () => {
     expect(res.success).toBe(false);
     expect(applied).toEqual([]);
     expect(messages).toEqual([]);
-    expect(res.outcome).toContain("ambiguous who the C-Score change applies to");
+    expect(res.outcome).toContain(
+      "ambiguous who the C-Score change applies to",
+    );
   });
 
   it("refuses a vague target that matches multiple prisoners", async () => {
@@ -306,6 +305,216 @@ describe("say cscore routing", () => {
   });
 });
 
+describe("say absent addressee warning", () => {
+  it("warns when the message names someone not in the chat", async () => {
+    const { deps } = makeDeps([GUARD, P1]);
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #6, answer me when I speak to you." },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true); // message still goes out
+    expect(res.outcome).toContain("Prisoner #6 is not in this conversation");
+    expect(res.outcome).toContain("cannot hear you");
+  });
+
+  it("does not warn when everyone named is present", async () => {
+    const { deps } = makeDeps([GUARD, P1]);
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #1, keep your voice down." },
+      {} as any,
+    );
+
+    expect(res.outcome).toBe("Message sent.");
+  });
+
+  it("lists every absent person named in the message", async () => {
+    const { deps } = makeDeps([GUARD, P1]);
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #3, Prisoner #4, keep the noise down." },
+      {} as any,
+    );
+
+    expect(res.outcome).toContain("Prisoner #3 and Prisoner #4");
+  });
+});
+
+describe("start_chat cooldown", () => {
+  it("blocks starting a chat while on a cooldown break", async () => {
+    const { deps } = makeDeps([], {
+      getCurrentChatId: () => null,
+      getChatCooldownMs: () => 30_000,
+      getNearbyAgents: () => [{ id: "p1", name: "Prisoner #1", distance: 10 }],
+    });
+    const { start_chat } = createChatTools(deps);
+
+    const res = await start_chat.execute(
+      { target_name: "Prisoner #1", message: "Hello." },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.outcome).toContain("break from conversation");
+  });
+
+  it("allows starting a chat once the cooldown has expired", async () => {
+    const { deps } = makeDeps([], {
+      getCurrentChatId: () => null,
+      getChatCooldownMs: () => 0,
+      getNearbyAgents: () => [{ id: "p1", name: "Prisoner #1", distance: 10 }],
+      createChat: () => ({
+        success: true,
+        chatId: "c1",
+        outcome: "Chat started.",
+      }),
+    });
+    const { start_chat } = createChatTools(deps);
+
+    const res = await start_chat.execute(
+      { target_name: "Prisoner #1", message: "Hello." },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true);
+  });
+});
+
+describe("start_chat opening message", () => {
+  function makeStartDeps(overrides: Partial<ChatDeps> = {}) {
+    return makeDeps([], {
+      getCurrentChatId: () => null,
+      getNearbyAgents: () => [{ id: "p1", name: "Prisoner #1", distance: 10 }],
+      createChat: () => ({
+        success: true,
+        chatId: "c1",
+        outcome: "Chat started with Prisoner #1.",
+      }),
+      ...overrides,
+    });
+  }
+
+  it("creates the chat and sends the opening line in one step", async () => {
+    const { deps, messages } = makeStartDeps();
+    const { start_chat } = createChatTools(deps);
+
+    const res = await start_chat.execute(
+      { target_name: "Prisoner #1", message: "Prisoner #1, step forward." },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toBe("Prisoner #1, step forward.");
+    expect(res.outcome).toContain("Wait for a reply");
+  });
+
+  it("dissolves a just-created chat when the opening line is rejected", async () => {
+    const leaveChat = vi.fn(() => ({ success: true, outcome: "Left." }));
+    const { deps } = makeStartDeps({
+      sendMessage: () => ({
+        success: false,
+        outcome: "You already said exactly that recently.",
+      }),
+      leaveChat,
+    });
+    const { start_chat } = createChatTools(deps);
+
+    const res = await start_chat.execute(
+      { target_name: "Prisoner #1", message: "Prisoner #1, step forward." },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.outcome).toContain("was not started");
+    expect(leaveChat).toHaveBeenCalledWith("c1");
+  });
+
+  it("joins the target's existing chat and speaks there", async () => {
+    const joinChat = vi.fn(() => ({ success: true, outcome: "Joined chat." }));
+    const { deps, messages } = makeStartDeps({
+      getNearbyAgents: () => [
+        { id: "p1", name: "Prisoner #1", distance: 10, inChat: "c9" },
+      ],
+      joinChat,
+    });
+    const { start_chat } = createChatTools(deps);
+
+    const res = await start_chat.execute(
+      { target_name: "Prisoner #1", message: "Prisoner #1, quiet down." },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true);
+    expect(joinChat).toHaveBeenCalledWith("c9");
+    expect(messages).toHaveLength(1);
+  });
+
+  it("stays in a joined chat even when the opening line is rejected", async () => {
+    const leaveChat = vi.fn(() => ({ success: true, outcome: "Left." }));
+    const { deps } = makeStartDeps({
+      getNearbyAgents: () => [
+        { id: "p1", name: "Prisoner #1", distance: 10, inChat: "c9" },
+      ],
+      joinChat: () => ({ success: true, outcome: "Joined chat." }),
+      sendMessage: () => ({
+        success: false,
+        outcome: "That exact line was just said in this conversation.",
+      }),
+      leaveChat,
+    });
+    const { start_chat } = createChatTools(deps);
+
+    const res = await start_chat.execute(
+      { target_name: "Prisoner #1", message: "Prisoner #1, quiet down." },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.outcome).toContain("joined the conversation");
+    expect(leaveChat).not.toHaveBeenCalled();
+  });
+
+  it("blocks leaving in the same turn as the opening line", async () => {
+    const { deps } = makeStartDeps();
+    const { start_chat, leave_chat } = createChatTools(deps);
+
+    await start_chat.execute(
+      { target_name: "Prisoner #1", message: "Prisoner #1, step forward." },
+      {} as any,
+    );
+    const res = await leave_chat.execute({}, {} as any);
+
+    expect(res.success).toBe(false);
+    expect(res.outcome).toContain("Wait for a reply");
+  });
+
+  it("does not send the message when already in another conversation", async () => {
+    const { deps, messages } = makeStartDeps({
+      getCurrentChatId: () => "existing",
+      getChatParticipants: () => [
+        { id: "g1", name: "Guard #1", role: "guard" },
+        { id: "p2", name: "Prisoner #2", role: "prisoner" },
+      ],
+    });
+    const { start_chat } = createChatTools(deps);
+
+    const res = await start_chat.execute(
+      { target_name: "Prisoner #1", message: "Prisoner #1, come here." },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.outcome).toContain("NOT sent");
+    expect(messages).toHaveLength(0);
+  });
+});
+
 describe("leave_chat timing", () => {
   it("refuses to leave in the same turn as speaking", async () => {
     const { deps } = makeDeps([GUARD, P1]);
@@ -376,5 +585,192 @@ describe("say cscore nudge", () => {
     );
 
     expect(res.outcome).toBe("Message sent.");
+  });
+});
+
+describe("location interrogation refusal", () => {
+  it("lets a guard ask where an unseen prisoner is", async () => {
+    const { deps, messages } = makeDeps([GUARD, P1], {
+      getNearbyAgents: () => [{ id: "p1", name: "Prisoner #1", distance: 5 }],
+      getKnownAgents: () => [GUARD, P1, P2],
+      isGuard: true,
+    });
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #1, where is Prisoner #2?" },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true);
+    expect(messages).toHaveLength(1);
+  });
+
+  it("opens a session for a guard asking after an unseen prisoner", async () => {
+    const createChat = vi.fn(() => ({
+      success: true,
+      chatId: "c1",
+      outcome: "Chat started.",
+    }));
+    const { deps, messages } = makeDeps([], {
+      getCurrentChatId: () => null,
+      getNearbyAgents: () => [{ id: "p1", name: "Prisoner #1", distance: 10 }],
+      createChat,
+      isGuard: true,
+    });
+    const { start_chat } = createChatTools(deps);
+
+    const res = await start_chat.execute(
+      {
+        target_name: "Prisoner #1",
+        message: "Prisoner #1, where is Prisoner #3?",
+      },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true);
+    expect(createChat).toHaveBeenCalled();
+    expect(messages).toHaveLength(1);
+  });
+
+  it("still lets a prisoner say they do not know where someone is", async () => {
+    const { deps, messages } = makeDeps(
+      [{ id: "p2", name: "Prisoner #2", role: "prisoner" }, GUARD],
+      {
+        agentId: "p2",
+        agentName: "Prisoner #2",
+        canAdjustCScore: false,
+        isGuard: false,
+        getNearbyAgents: () => [{ id: "g1", name: "Guard #1", distance: 5 }],
+      },
+    );
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Officer, I don't know where Prisoner #1 is." },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true);
+    expect(messages).toHaveLength(1);
+  });
+});
+
+describe("say — region-aware visibility for location questions", () => {
+  const G: Participant = { id: "g1", name: "Guard #1", role: "guard" };
+  const P3: Participant = { id: "p3", name: "Prisoner #3", role: "prisoner" };
+
+  // The proximity radius (100 units) is smaller than the larger regions, so
+  // sharing a region must count as seeing someone. Otherwise a guard asks
+  // where a prisoner standing across the same room is.
+  it("refuses a location question about someone in the same region but out of radius", async () => {
+    const { deps } = makeDeps([G, P1], {
+      isGuard: true,
+      getNearbyAgents: () => [], // nobody within the radius
+      getKnownAgents: () => [{ id: "p3", name: "Prisoner #3" }],
+      getRegionOf: () => "Common Area", // guard and #3 share the room
+    });
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #1, where is Prisoner #3?" },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.outcome).toMatch(/already see Prisoner #3/i);
+  });
+
+  it("allows a location question about someone in a different region", async () => {
+    const { deps } = makeDeps([G, P1], {
+      isGuard: true,
+      getNearbyAgents: () => [],
+      getKnownAgents: () => [{ id: "p3", name: "Prisoner #3" }],
+      getRegionOf: (id: string) => (id === "g1" ? "Common Area" : "Rec Room"),
+    });
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #1, where is Prisoner #3?" },
+      {} as any,
+    );
+
+    expect(res.success).toBe(true);
+  });
+
+  it("falls back to proximity when the region is unknown", async () => {
+    const { deps } = makeDeps([G, P1], {
+      isGuard: true,
+      getNearbyAgents: () => [{ id: "p3", name: "Prisoner #3", distance: 20 }],
+      getKnownAgents: () => [{ id: "p3", name: "Prisoner #3" }],
+      getRegionOf: () => "unknown",
+    });
+    const { say } = createChatTools(deps);
+
+    const res = await say.execute(
+      { message: "Prisoner #1, where is Prisoner #3?" },
+      {} as any,
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.outcome).toMatch(/already see/i);
+  });
+});
+
+describe("say — work-detail task refusals", () => {
+  const assigned = {
+    prisonerName: "Prisoner #1",
+    task: "clean the Common Area",
+    assignedBy: "Guard #1",
+    assignedAt: 0,
+    status: "assigned" as const,
+  };
+
+  it("refuses a guard asking an unassigned prisoner what their task is", async () => {
+    const { deps } = makeDeps([GUARD, P2], {
+      isGuard: true,
+      getPrisonerTask: () => undefined,
+      isWorkDetail: () => true,
+    });
+    const { say } = createChatTools(deps);
+    const res = await say.execute(
+      { message: "Prisoner #2, what is your task?" },
+      {} as any,
+    );
+    expect(res.success).toBe(false);
+    expect(res.outcome).toMatch(/assign_task/i);
+  });
+
+  it("allows a guard to supervise a prisoner who already has a job", async () => {
+    const { deps } = makeDeps([GUARD, P1], {
+      isGuard: true,
+      getPrisonerTask: () => assigned,
+      isWorkDetail: () => true,
+    });
+    const { say } = createChatTools(deps);
+    const res = await say.execute(
+      { message: "Prisoner #1, I see you are cleaning the Common Area. Keep at it." },
+      {} as any,
+    );
+    expect(res.success).toBe(true);
+  });
+
+  it("refuses a prisoner who already has a job asking what the task is", async () => {
+    const P5: Participant = { id: "p5", name: "Prisoner #5", role: "prisoner" };
+    const { deps } = makeDeps([P1, P5], {
+      agentId: "p1",
+      agentName: "Prisoner #1",
+      isGuard: false,
+      canAdjustCScore: false,
+      getPrisonerTask: (name) => (name === "Prisoner #1" ? assigned : undefined),
+      isWorkDetail: () => true,
+    });
+    const { say } = createChatTools(deps);
+    const res = await say.execute(
+      { message: "Prisoner #5, what is the task for tonight?" },
+      {} as any,
+    );
+    expect(res.success).toBe(false);
+    expect(res.outcome).toMatch(/already have a job/i);
   });
 });

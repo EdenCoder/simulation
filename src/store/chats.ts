@@ -5,11 +5,32 @@ import { useAgentsStore } from "./agents";
 import { getAgentWorldPosition } from "@/bridge";
 
 
-/** Last message per speaker, for loop damping across chat sessions. */
-const lastMessageBySpeaker = new Map<
+/**
+ * Max people in one conversation. Larger groups devolve into cross-talk
+ * where messages stop landing on their addressee — guards end up
+ * demanding answers from prisoners who have already left.
+ */
+export const MAX_CHAT_PARTICIPANTS = 3;
+
+/** Recent messages per speaker, for repeat damping across chat sessions. */
+const recentMessagesBySpeaker = new Map<
   string,
-  { content: string; timestamp: number }
+  Array<{ content: string; timestamp: number }>
 >();
+const SPEAKER_REPEAT_WINDOW_MS = 120_000;
+const SPEAKER_REPEAT_HISTORY = 3;
+
+/**
+ * Echo damping: verbatim copies of a line said moments ago in the same
+ * session are rejected. Short acknowledgments ("Yes, officer.") are exempt.
+ */
+const ECHO_WINDOW = 5;
+const ECHO_MIN_LENGTH = 20;
+
+/** Test-only: reset the cross-session repeat damping state. */
+export function clearRepeatDamping(): void {
+  recentMessagesBySpeaker.clear();
+}
 
 /** A chat session between two or more agents. */
 export interface ChatSession {
@@ -81,6 +102,12 @@ export const useChatsStore = create<ChatsStore>((set, get) => ({
         outcome: "At least 2 participants are required.",
       };
     }
+    if (participantIds.length > MAX_CHAT_PARTICIPANTS) {
+      return {
+        success: false,
+        outcome: `A conversation can have at most ${MAX_CHAT_PARTICIPANTS} people.`,
+      };
+    }
 
     const agentsStore = useAgentsStore.getState();
 
@@ -122,6 +149,12 @@ export const useChatsStore = create<ChatsStore>((set, get) => ({
       // Already in this chat — that's fine, treat as success
       useAgentsStore.getState().updateChatId(agentId, chatId);
       return { success: true, outcome: "Already in this chat." };
+    }
+    if (session.participants.length >= MAX_CHAT_PARTICIPANTS) {
+      return {
+        success: false,
+        outcome: `That conversation is full (${MAX_CHAT_PARTICIPANTS} people max). Talk to someone else or do something different.`,
+      };
     }
 
     // Leave any existing chat first
@@ -199,32 +232,54 @@ export const useChatsStore = create<ChatsStore>((set, get) => ({
       };
     }
 
-    // Loop damping: agents tend to re-send the exact same line every tick,
-    // across freshly created sessions, flooding the log (one prisoner sent
-    // the same question 220 times in one run). Reject verbatim repeats from
-    // the same speaker within 30 seconds.
-    const last = lastMessageBySpeaker.get(message.id);
-    if (
-      last &&
-      last.content === message.content &&
-      message.timestamp - last.timestamp < 30_000
-    ) {
+    // Loop damping: agents re-send the exact same line every tick, across
+    // freshly created sessions, flooding the log. Reject verbatim repeats
+    // of any of the speaker's recent lines within the damping window.
+    const recent = recentMessagesBySpeaker.get(message.id) ?? [];
+    const isOwnRepeat = recent.some(
+      (r) =>
+        r.content === message.content &&
+        message.timestamp - r.timestamp < SPEAKER_REPEAT_WINDOW_MS,
+    );
+    if (isOwnRepeat) {
       return {
         success: false,
         outcome:
-          "You already said exactly that a moment ago. Do not repeat yourself — wait for a reply, rephrase, or take a different action.",
+          "You already said exactly that recently. Do not repeat yourself — respond to what was said, rephrase, or take a different action.",
       };
     }
-    lastMessageBySpeaker.set(message.id, {
-      content: message.content,
-      timestamp: message.timestamp,
-    });
+
+    // Echo damping: agents parrot a line another participant just said
+    // ("It's a bit overwhelming..." repeated by three prisoners in a row).
+    // Reject verbatim echoes of the session's recent messages; short
+    // acknowledgments are allowed.
+    if (message.content.length >= ECHO_MIN_LENGTH) {
+      const echoed = session.messages
+        .slice(-ECHO_WINDOW)
+        .some((m) => m.content === message.content);
+      if (echoed) {
+        return {
+          success: false,
+          outcome:
+            "That exact line was just said in this conversation. Do not echo it — say something new that responds to it.",
+        };
+      }
+    }
+
+    recent.push({ content: message.content, timestamp: message.timestamp });
+    if (recent.length > SPEAKER_REPEAT_HISTORY) recent.shift();
+    recentMessagesBySpeaker.set(message.id, recent);
 
     // The message carries its own C-Score change (set by the `say` tool), so
-    // store it as-is. Exports derive running totals from these deltas.
+    // store it as-is, adding a snapshot of who was present to hear it.
+    // Exports derive running totals from the C-Score deltas.
+    const stored: ChatMessage = {
+      ...message,
+      recipients: session.participants.filter((pid) => pid !== message.id),
+    };
     const updated: ChatSession = {
       ...session,
-      messages: [...session.messages, message],
+      messages: [...session.messages, stored],
     };
     set((state) => ({ sessions: { ...state.sessions, [chatId]: updated } }));
 

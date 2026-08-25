@@ -142,11 +142,38 @@ export async function forceMoveTo(
   const prisoner = agentManager.getAgentById(prisonerId) as Agent | undefined;
   if (!guard || !prisoner) return false;
 
+  // The prisoner moves as escorted: the guard's master key opens locked
+  // doors (cells, Solitary) along the way for both of them.
   const [gs, ps] = await Promise.all([
     guard.setTarget(x, y, true),
-    prisoner.setTarget(x, y, true),
+    prisoner.escortTo(x, y, true),
   ]);
   return gs && ps;
+}
+
+/**
+ * Walk an agent to the center of a named region as an escorted move
+ * (locked doors open en route). Used by the schedule enforcer to return
+ * prisoners to their cells at curfew.
+ */
+export async function escortAgentToRegion(
+  agentId: string,
+  regionLabel: string,
+): Promise<boolean> {
+  if (!agentManager) return false;
+  const agent = agentManager.getAgentById(agentId) as Agent | undefined;
+  const region = getRegions().find(
+    (r) => r.label.toLowerCase() === regionLabel.toLowerCase(),
+  );
+  if (!agent || !region) return false;
+  return agent.escortTo(region.x + region.width / 2, region.y + region.height / 2);
+}
+
+/** Whether an agent currently has a movement in progress. */
+export function isAgentMoving(agentId: string): boolean {
+  if (!agentManager) return false;
+  const agent = agentManager.getAgentById(agentId) as Agent | undefined;
+  return agent ? agent.isCurrentlyMoving() : false;
 }
 
 /** Get an agent's world-space position from the Phaser sprite. */
@@ -168,5 +195,7 @@ export function getBridgeFunctions() {
     getAllDoorStates: getAllDoorsWithStates,
     getRegions,
     getAgentWorldPosition,
+    escortAgentToRegion,
+    isAgentMoving,
   };
 }

@@ -1,3 +1,3 @@
-export { prisonScenario } from './config';
-export { getPrisonerPrompt } from './prompts/prisoner';
-export { getGuardPrompt } from './prompts/guard';
+export { prisonScenario } from "./config";
+export { getGuardPrompt } from "./prompts/guard";
+export { getPrisonerPrompt } from "./prompts/prisoner";
