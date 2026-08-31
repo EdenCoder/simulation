@@ -4,7 +4,6 @@ import type { ChatMessage } from "./agents";
 import { useAgentsStore } from "./agents";
 import { getAgentWorldPosition } from "@/bridge";
 
-
 /**
  * Max people in one conversation. Larger groups devolve into cross-talk
  * where messages stop landing on their addressee — guards end up
@@ -15,7 +14,7 @@ export const MAX_CHAT_PARTICIPANTS = 3;
 /** Recent messages per speaker, for repeat damping across chat sessions. */
 const recentMessagesBySpeaker = new Map<
   string,
-  Array<{ content: string; timestamp: number }>
+  Array<{ content: string; timestamp: number; audience: string }>
 >();
 const SPEAKER_REPEAT_WINDOW_MS = 120_000;
 const SPEAKER_REPEAT_HISTORY = 3;
@@ -30,6 +29,13 @@ const ECHO_MIN_LENGTH = 20;
 /** Test-only: reset the cross-session repeat damping state. */
 export function clearRepeatDamping(): void {
   recentMessagesBySpeaker.clear();
+}
+
+function audienceKey(participants: string[], speakerId: string): string {
+  return participants
+    .filter((pid) => pid !== speakerId)
+    .sort()
+    .join(",");
 }
 
 /** A chat session between two or more agents. */
@@ -234,13 +240,18 @@ export const useChatsStore = create<ChatsStore>((set, get) => ({
 
     // Loop damping: agents re-send the exact same line every tick, across
     // freshly created sessions, flooding the log. Reject verbatim repeats
-    // of any of the speaker's recent lines within the damping window.
+    // of the speaker's recent lines to the same audience; short
+    // acknowledgments are exempt.
     const recent = recentMessagesBySpeaker.get(message.id) ?? [];
-    const isOwnRepeat = recent.some(
-      (r) =>
-        r.content === message.content &&
-        message.timestamp - r.timestamp < SPEAKER_REPEAT_WINDOW_MS,
-    );
+    const audience = audienceKey(session.participants, message.id);
+    const isOwnRepeat =
+      message.content.length >= ECHO_MIN_LENGTH &&
+      recent.some(
+        (r) =>
+          r.content === message.content &&
+          r.audience === audience &&
+          message.timestamp - r.timestamp < SPEAKER_REPEAT_WINDOW_MS,
+      );
     if (isOwnRepeat) {
       return {
         success: false,
@@ -266,7 +277,11 @@ export const useChatsStore = create<ChatsStore>((set, get) => ({
       }
     }
 
-    recent.push({ content: message.content, timestamp: message.timestamp });
+    recent.push({
+      content: message.content,
+      timestamp: message.timestamp,
+      audience,
+    });
     if (recent.length > SPEAKER_REPEAT_HISTORY) recent.shift();
     recentMessagesBySpeaker.set(message.id, recent);
 
