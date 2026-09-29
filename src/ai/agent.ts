@@ -43,9 +43,12 @@ import {
   RelationshipState,
 } from "./tools/relationship";
 import {
+  confinementMinutes,
   getSolitaryContext,
+  getSolitaryHistory,
   recordConfinement,
   recordRelease,
+  reconcileConfinements,
 } from "./tools/solitary";
 import {
   createTaskTools,
@@ -64,10 +67,51 @@ interface MessageLogEntry {
   role: string;
   content: string;
   timestamp: number;
+  /**
+   * Structured payload for non-LLM rows: the context an agent was given
+   * on a turn, a movement, or a runtime event. Serialized as-is into the
+   * export so analysis does not have to parse prose.
+   */
+  detail?: Record<string, unknown>;
 }
 
 /** Append-only log of all LLM messages across the simulation. Never trimmed. */
 const messageLog: MessageLogEntry[] = [];
+
+/**
+ * Record something that is not an LLM message: the context an agent saw,
+ * a movement, or a runtime event such as a timeout or watchdog restart.
+ * Without these the export shows only what agents said, so an agent that
+ * stopped ticking is invisible and what an agent could see when it spoke
+ * has to be reconstructed from geometry.
+ */
+function logEvent(
+  role: string,
+  agentId: string,
+  content: string,
+  detail?: Record<string, unknown>,
+): void {
+  const agent = useAgentsStore.getState().getAgent(agentId);
+  messageLog.push({
+    agentId,
+    agentName: agent?.name ?? agentId,
+    agentRole: agent?.role ?? "",
+    currentRegion: agentId ? getAgentRegion(agentId) : "",
+    role,
+    content,
+    timestamp: Date.now(),
+    ...(detail ? { detail } : {}),
+  });
+}
+
+/** Runtime events (timeout, watchdog restart, history reset, rate limit). */
+export function logSystemEvent(
+  agentId: string,
+  event: string,
+  detail?: Record<string, unknown>,
+): void {
+  logEvent("system_event", agentId, event, { event, ...(detail ?? {}) });
+}
 
 // --- Hourly C-score snapshots ---
 
@@ -352,6 +396,78 @@ function buildSystemPrompt(agentConfig: AgentConfig): string {
   }
 
   return getPrisonerPrompt(number);
+}
+
+/**
+ * Machine-readable version of the turn's context: what the agent could
+ * see, which schedule phase applied, who was confined, and its own task.
+ * Logged next to the prose so analysis can filter on it directly.
+ */
+function snapshotContext(
+  agentId: string,
+  runtime: AgentRuntime,
+): Record<string, unknown> {
+  const agentsStore = useAgentsStore.getState();
+  const simTime = getCurrentGameTime();
+  const myRegion = getAgentRegion(agentId);
+  const nearby = useChatsStore.getState().getNearbyAgents(agentId);
+  const nearbyIds = new Set(nearby.map((a) => a.id));
+  const prisoners = agentsStore
+    .getAllAgents()
+    .filter((a) => a.role === "prisoner");
+  const inSolitary = prisoners
+    .filter((p) => getAgentRegion(p.id) === "Solitary")
+    .map((p) => p.name);
+  reconcileConfinements(inSolitary);
+  const isGuard = runtime.config.role === "guard";
+
+  const visible = isGuard
+    ? prisoners.filter(
+        (p) =>
+          !inSolitary.includes(p.name) &&
+          (nearbyIds.has(p.id) ||
+            getAgentRegion(p.id) === myRegion ||
+            getAgentRegion(p.id) === GUARD_ROOM),
+      )
+    : [];
+
+  const chat = useChatsStore.getState().getAgentSession(agentId);
+  const task = isGuard ? undefined : getTask(runtime.config.name);
+
+  return {
+    region: myRegion,
+    schedulePhase: simTime ? getSchedulePhase(simTime) : null,
+    simTime: simTime ? simTime.toISOString() : null,
+    nearby: nearby.map((a) => ({ name: a.name, region: getAgentRegion(a.id) })),
+    ...(isGuard
+      ? {
+          visiblePrisoners: visible.map((pr) => ({
+            name: pr.name,
+            region: getAgentRegion(pr.id),
+          })),
+          notInSight: prisoners
+            .filter(
+              (pr) =>
+                !inSolitary.includes(pr.name) &&
+                !visible.some((v) => v.id === pr.id),
+            )
+            .map((pr) => pr.name),
+        }
+      : {}),
+    inSolitary,
+    inChatWith: chat
+      ? chat.participants
+          .filter((pid) => pid !== agentId)
+          .map((pid) => agentsStore.getAgent(pid)?.name ?? pid)
+      : [],
+    chatMessageCount: chat ? chat.messages.length : 0,
+    ...(task
+      ? { task: task.task, taskStatus: task.status, taskBy: task.assignedBy }
+      : {}),
+    cScores: Object.fromEntries(
+      agentsStore.getAllPrisonerPoints().map((pt) => [pt.name, pt.points]),
+    ),
+  };
 }
 
 function buildDynamicContext(agentId: string, runtime: AgentRuntime): string {
@@ -648,6 +764,21 @@ function buildTools(
           : null,
       getGameTime: getCurrentGameTime,
       onMoveStart: (id, label, isForced, targetId) => {
+        // Movement is otherwise only inferable from currentRegion changing
+        // between rows; record it as an event with origin and destination.
+        logEvent(isForced ? "escort" : "move", id, label, {
+          from: getAgentRegion(id),
+          to: label,
+          forced: !!isForced,
+          ...(targetId
+            ? {
+                target:
+                  useAgentsStore.getState().getAgent(targetId)?.name ??
+                  targetId,
+                targetFrom: getAgentRegion(targetId),
+              }
+            : {}),
+        });
         lastMoveAt.set(id, Date.now());
         if (targetId) lastMoveAt.set(targetId, Date.now());
         useAgentsStore.getState().updateMoveBubble(id, {
@@ -857,6 +988,22 @@ const LLM_WARMUP_TIMEOUT_MS = 180_000;
  */
 const activeTicks = new Set<string>();
 
+const queuedTicks = new Set<string>();
+
+const tickTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleTick(agentId: string, delayMs: number): void {
+  const existing = tickTimers.get(agentId);
+  if (existing) clearTimeout(existing);
+  tickTimers.set(
+    agentId,
+    setTimeout(() => {
+      tickTimers.delete(agentId);
+      tickAgent(agentId);
+    }, delayMs),
+  );
+}
+
 /** Last time each agent entered tickAgent; the watchdog restarts stalled loops. */
 const lastTickAt = new Map<string, number>();
 
@@ -867,11 +1014,15 @@ async function tickAgent(agentId: string): Promise<void> {
   // Don't tick if bridge isn't ready yet
   if (!bridgeFns) {
     console.log(`[AI] ${agentId}: Waiting for bridge...`);
-    setTimeout(() => tickAgent(agentId), 2000);
+    scheduleTick(agentId, 2000);
     return;
   }
 
-  if (activeTicks.has(agentId)) return;
+  if (activeTicks.has(agentId)) {
+    queuedTicks.add(agentId);
+    return;
+  }
+  queuedTicks.delete(agentId);
   activeTicks.add(agentId);
   lastTickAt.set(agentId, Date.now());
 
@@ -901,6 +1052,17 @@ async function tickAgent(agentId: string): Promise<void> {
     const result = await scheduleAgentCall(agentId, runtime.config.role, () => {
       const dynamicContext = buildDynamicContext(agentId, runtime);
       const tools = buildTools(agentId, runtime);
+
+      // Record what this agent was actually shown. Without it the export
+      // holds only what agents said, and questions like "could this guard
+      // see the prisoner it was hunting for?" have to be reconstructed
+      // from geometry after the fact.
+      logEvent(
+        "context",
+        agentId,
+        dynamicContext,
+        snapshotContext(agentId, runtime),
+      );
 
       console.log(
         `[AI] ${agentId}: Tick (${Object.keys(tools).length} tools, ${runtime.messages.length} msgs)`,
@@ -1012,7 +1174,7 @@ async function tickAgent(agentId: string): Promise<void> {
 
     // Schedule next tick — faster if in an active conversation waiting for our reply
     const nextDelay = getTickDelay(agentId);
-    setTimeout(() => tickAgent(agentId), nextDelay);
+    scheduleTick(agentId, nextDelay);
   } catch (error: unknown) {
     const err = error as {
       name?: string;
@@ -1032,7 +1194,8 @@ async function tickAgent(agentId: string): Promise<void> {
       console.warn(
         `[AI] ${agentId}: LLM call timed out after ${callTimeoutMs / 1000}s (backend cold start or stalled worker), retrying in 5s`,
       );
-      setTimeout(() => tickAgent(agentId), 5000);
+      logSystemEvent(agentId, "llm_timeout", { timeoutMs: callTimeoutMs });
+      scheduleTick(agentId, 5000);
       return;
     }
     const is400 =
@@ -1057,7 +1220,8 @@ async function tickAgent(agentId: string): Promise<void> {
       console.warn(
         `[AI] ${agentId}: Model emitted malformed ${toolName}() call (missing required args), skipping tick`,
       );
-      setTimeout(() => tickAgent(agentId), 2000);
+      logSystemEvent(agentId, "malformed_tool_call", { tool: toolName });
+      scheduleTick(agentId, 2000);
       return;
     }
 
@@ -1073,6 +1237,9 @@ async function tickAgent(agentId: string): Promise<void> {
         `[AI] ${agentId}: Resetting message history ${corrupted ? "(orphan tool at index 0)" : "(400 — likely tool-call/result mismatch)"}`,
       );
       runtime.messages = [{ role: "user", content: INITIAL_USER_MESSAGE }];
+      logSystemEvent(agentId, "history_reset", {
+        reason: corrupted ? "orphan_tool_message" : "http_400",
+      });
     }
 
     const backoff = is429 ? 30000 : 5000;
@@ -1085,10 +1252,15 @@ async function tickAgent(agentId: string): Promise<void> {
       `[AI] ${agentId}: Tick failed (${reason}), retry in ${backoff / 1000}s`,
     );
     if (!is429) console.error("[AI] Full error:", error);
-    setTimeout(() => tickAgent(agentId), backoff);
+    logSystemEvent(agentId, is429 ? "rate_limited" : "tick_failed", {
+      reason,
+      retryInMs: backoff,
+    });
+    scheduleTick(agentId, backoff);
   } finally {
     if (holdWarmupSlot) releaseWarmupSlot();
     activeTicks.delete(agentId);
+    if (queuedTicks.delete(agentId)) scheduleTick(agentId, 0);
   }
 }
 
@@ -1116,7 +1288,9 @@ function startTickWatchdog(): void {
         console.warn(
           `[AI] ${agentId}: No tick for ${Math.round((now - last) / 1000)}s — watchdog restarting the loop`,
         );
+        logSystemEvent(agentId, "watchdog_restart", { idleMs: now - last });
         activeTicks.delete(agentId);
+        queuedTicks.delete(agentId);
         tickAgent(agentId);
       }
     }
@@ -1262,7 +1436,39 @@ export function exportMessagesAsJSONL(): string {
     });
   }
 
-  // 3. Hourly C-score snapshots
+  // 3. Solitary confinements: who was confined, by whom, for how long,
+  // and who released them. Held in memory by the tool, so without this it
+  // never reaches the export at all.
+  reconcileConfinements(
+    useAgentsStore
+      .getState()
+      .getAllAgents()
+      .filter(
+        (a) => a.role === "prisoner" && getAgentRegion(a.id) === "Solitary",
+      )
+      .map((a) => a.name),
+  );
+  for (const rec of getSolitaryHistory()) {
+    allLines.push({
+      role: "solitary",
+      agentName: rec.prisonerName,
+      agentRole: "prisoner",
+      timestamp: rec.confinedAt,
+      content: `confined by ${rec.confinedBy}`,
+      detail: {
+        confinedBy: rec.confinedBy,
+        confinedAt: rec.confinedAt,
+        releasedBy: rec.releasedBy ?? null,
+        releasedAt: rec.releasedAt ?? null,
+        confinementInferred: rec.confinementInferred ?? false,
+        releaseInferred: rec.releaseInferred ?? false,
+        simMinutes: confinementMinutes(rec),
+        stillConfined: !rec.releasedAt,
+      },
+    });
+  }
+
+  // 4. Hourly C-score snapshots
   for (const snapshot of cScoreSnapshots) {
     allLines.push({
       role: "cscore_snapshot",
@@ -1272,7 +1478,7 @@ export function exportMessagesAsJSONL(): string {
     });
   }
 
-  // 4. Final C-score snapshot at download time
+  // 5. Final C-score snapshot at download time
   const simTime = getCurrentGameTime();
   const prisoners = agentsStore
     .getAllAgents()

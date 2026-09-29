@@ -137,6 +137,35 @@ describe("repeat and echo damping", () => {
     ).toBe(true);
   });
 
+  it("allows the same line to a different audience", () => {
+    const store = useChatsStore.getState();
+    const line = "I was told to mop the shower floor before lights out.";
+
+    const a = store.createSession(["p1", "p2"]).chatId!;
+    expect(
+      store.sendMessage(a, msg("p1", "Prisoner #1", line, 1000)).success,
+    ).toBe(true);
+
+    const b = store.createSession(["p1", "p3"]).chatId!;
+    expect(
+      store.sendMessage(b, msg("p1", "Prisoner #1", line, 5000)).success,
+    ).toBe(true);
+  });
+
+  it("allows a speaker to repeat a short acknowledgment", () => {
+    const store = useChatsStore.getState();
+    const { chatId } = store.createSession(["p1", "g1"]);
+
+    expect(
+      store.sendMessage(chatId!, msg("p1", "Prisoner #1", "Yes, sir.", 1000))
+        .success,
+    ).toBe(true);
+    expect(
+      store.sendMessage(chatId!, msg("p1", "Prisoner #1", "Yes, sir.", 4000))
+        .success,
+    ).toBe(true);
+  });
+
   it("allows the same line again after the damping window has passed", () => {
     const store = useChatsStore.getState();
     const { chatId } = store.createSession(["p1", "p2"]);

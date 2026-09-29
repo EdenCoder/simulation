@@ -6,6 +6,7 @@ import {
   getActiveConfinement,
   getSolitaryContext,
   getSolitaryHistory,
+  reconcileConfinements,
   recordConfinement,
   recordRelease,
 } from "@/ai/tools/solitary";
@@ -95,5 +96,54 @@ describe("getSolitaryContext", () => {
     const ctx = getSolitaryContext(T0);
     expect(ctx).toContain("Prisoner #2");
     expect(ctx).toContain("Prisoner #5");
+  });
+});
+
+describe("reconcileConfinements", () => {
+  it("closes a confinement when the prisoner is no longer in Solitary", () => {
+    recordConfinement("Prisoner #2", "Guard #1", 1000);
+    reconcileConfinements([], 2000);
+
+    const [rec] = getSolitaryHistory();
+    expect(rec.releasedAt).toBe(2000);
+    expect(rec.releaseInferred).toBe(true);
+    expect(getActiveConfinement("Prisoner #2")).toBeUndefined();
+  });
+
+  it("leaves a confinement open while the prisoner is still there", () => {
+    recordConfinement("Prisoner #2", "Guard #1", 1000);
+    reconcileConfinements(["Prisoner #2"], 2000);
+
+    expect(getActiveConfinement("Prisoner #2")?.releasedAt).toBeUndefined();
+  });
+
+  it("opens a record for a prisoner found in Solitary with none", () => {
+    reconcileConfinements(["Prisoner #4"], 1000);
+
+    const rec = getActiveConfinement("Prisoner #4")!;
+    expect(rec.confinedBy).toBe("unrecorded");
+    expect(rec.confinementInferred).toBe(true);
+  });
+
+  it("attributes an inferred confinement once a guard reports it", () => {
+    reconcileConfinements(["Prisoner #4"], 1000);
+    recordConfinement("Prisoner #4", "Guard #3", 1200);
+
+    const rec = getActiveConfinement("Prisoner #4")!;
+    expect(rec.confinedBy).toBe("Guard #3");
+    expect(rec.confinementInferred).toBeUndefined();
+    expect(getSolitaryHistory()).toHaveLength(1);
+  });
+
+  it("attributes an inferred release once a guard reports it", () => {
+    recordConfinement("Prisoner #2", "Guard #1", 1000);
+    reconcileConfinements([], 2000);
+    recordRelease("Prisoner #2", "Guard #3", 2500);
+
+    const [rec] = getSolitaryHistory();
+    expect(rec.releasedBy).toBe("Guard #3");
+    expect(rec.releaseInferred).toBeUndefined();
+    expect(rec.releasedAt).toBe(2000);
+    expect(getSolitaryHistory()).toHaveLength(1);
   });
 });

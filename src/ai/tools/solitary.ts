@@ -17,6 +17,8 @@ export interface SolitaryRecord {
   confinedAt: number;
   releasedBy?: string;
   releasedAt?: number;
+  confinementInferred?: boolean;
+  releaseInferred?: boolean;
 }
 
 const log: SolitaryRecord[] = [];
@@ -44,7 +46,14 @@ export function recordConfinement(
   guardName: string,
   now = Date.now(),
 ): void {
-  if (getActiveConfinement(prisonerName)) return;
+  const open = getActiveConfinement(prisonerName);
+  if (open) {
+    if (open.confinementInferred) {
+      open.confinedBy = guardName;
+      delete open.confinementInferred;
+    }
+    return;
+  }
   log.push({ prisonerName, confinedBy: guardName, confinedAt: now });
 }
 
@@ -55,9 +64,47 @@ export function recordRelease(
   now = Date.now(),
 ): void {
   const open = getActiveConfinement(prisonerName);
-  if (!open) return;
-  open.releasedBy = guardName;
-  open.releasedAt = now;
+  if (open) {
+    open.releasedBy = guardName;
+    open.releasedAt = now;
+    return;
+  }
+  const inferred = [...log]
+    .reverse()
+    .find((r) => r.prisonerName === prisonerName && r.releaseInferred);
+  if (inferred) {
+    inferred.releasedBy = guardName;
+    delete inferred.releaseInferred;
+  }
+}
+
+/**
+ * Reconcile the log against where prisoners actually are. The escort
+ * callback only fires when forceMoveTo resolves true for both walkers, so
+ * an interrupted escort leaves a confinement open after the prisoner has
+ * physically left, or leaves an arrival unrecorded. Position is the
+ * ground truth; entries closed or opened this way are marked inferred so
+ * the export can tell them apart from a guard-reported one.
+ */
+export function reconcileConfinements(
+  confinedNow: string[],
+  now = Date.now(),
+): void {
+  const present = new Set(confinedNow);
+  for (const r of log) {
+    if (r.releasedAt || present.has(r.prisonerName)) continue;
+    r.releasedAt = now;
+    r.releaseInferred = true;
+  }
+  for (const name of present) {
+    if (getActiveConfinement(name)) continue;
+    log.push({
+      prisonerName: name,
+      confinedBy: "unrecorded",
+      confinedAt: now,
+      confinementInferred: true,
+    });
+  }
 }
 
 /** How long a confinement has run, in whole sim-minutes. */
